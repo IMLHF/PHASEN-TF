@@ -36,7 +36,8 @@ class Module(object):
     self.mixed_wav_batch = mixed_wav_batch
     self.mixed_stft_batch = misc_utils.tf_wav2stft(self.mixed_wav_batch,
                                                    PARAM.frame_length,
-                                                   PARAM.frame_step)
+                                                   PARAM.frame_step,
+                                                   PARAM.fft_length)
     self.mixed_mag_batch = tf.abs(self.mixed_stft_batch)
     self.mixed_angle_batch = tf.angle(self.mixed_stft_batch)
     self.batch_size = tf.shape(self.mixed_wav_batch)[0]
@@ -45,10 +46,15 @@ class Module(object):
       self.clean_wav_batch = clean_wav_batch
       self.clean_stft_batch = misc_utils.tf_wav2stft(self.clean_wav_batch,
                                                      PARAM.frame_length,
-                                                     PARAM.frame_step)
+                                                     PARAM.frame_step,
+                                                     PARAM.fft_length)
       self.clean_mag_batch = tf.abs(self.clean_stft_batch)
       self.clean_angle_batch = tf.angle(self.clean_stft_batch)
-      self.clean_complexPhase_batch = self.clean_stft_batch / tf.complex(self.clean_mag_batch, 0.0)
+      stft_r_t = tf.concat([tf.expand_dims(tf.real(self.clean_stft_batch),-1),
+                            tf.expand_dims(tf.imag(self.clean_stft_batch),-1)],
+                           -1)
+      # TODO:  be careful, clean_mag_batch may contain zeors !
+      self.clean_complexPhase_batch = stft_r_t / (tf.expand_dims(self.clean_mag_batch, -1)+1e-16)
 
     # create required variables
     self._init_variables()
@@ -67,7 +73,7 @@ class Module(object):
 
     # for lr halving
     self._new_lr = tf.compat.v1.placeholder(tf.float32, name='new_lr')
-    self._assign_lr = tf.compat.v1.assign(self._lr, self.new_lr)
+    self._assign_lr = tf.compat.v1.assign(self._lr, self._new_lr)
 
     # for lr warmup
     if PARAM.use_lr_warmup:

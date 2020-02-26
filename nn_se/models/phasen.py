@@ -18,7 +18,7 @@ class Stream_PreNet:
     self.conv2d_lst = []
     for i, kernel in enumerate(kernels):
       conv_name = name+("_%d" % i)
-      conv2d = tf.keras.layer.Conv2D(filters=channel_out, kernel_size=kernel, padding="same",name=conv_name)
+      conv2d = tf.keras.layers.Conv2D(filters=channel_out, kernel_size=kernel, padding="same",name=conv_name)
       self.conv2d_lst.append(conv2d)
 
   def __call__(self, feature_in):
@@ -34,38 +34,59 @@ class Stream_PreNet:
     return out
 
 
+class BatchNormAndActivate:
+  def __init__(self, bn_axis=-1, activation=tf.keras.activations.relu, name='BN_activate'):
+    self.bn_layer = tf.keras.layers.BatchNormalization(bn_axis, name=name)
+    self.activate_fn = activation
+
+  def __call__(self, fea_in):
+    return self.activate_fn(self.bn_layer(fea_in))
+
+
 class FrequencyTransformationBlock:
   def __init__(self, frequency_dim, channel_in_out, channel_attention=5, name="FTB"):
-    self.att_conv2d_1 = tf.keras.layers.Conv2d(channel_attention, [1,1], padding="same",
+    self.att_conv2d_1 = tf.keras.layers.Conv2D(channel_attention, [1,1], padding="same",
                                                name=name+"/att_conv2d_1")  # [batch, T, F * channel_attention]
+    self.att_conv2d_1_bna = BatchNormAndActivate(name=name+"/att_conv2d_1_bna")
+
     self.att_inner_reshape = tf.keras.layers.Reshape([-1, frequency_dim * channel_attention])
-    self.att_conv1d_2 = tf.keras.layers.Conv1d(frequency_dim, 9, padding="same",
+    self.att_conv1d_2 = tf.keras.layers.Conv1D(frequency_dim, 9, padding="same",
                                                name=name+"/att_conv1d_2")  # [batch, T, F]
+    self.att_conv1d_2_bna = BatchNormAndActivate(name=name+"/att_conv1d_2_bna")
     self.att_out_reshape = tf.keras.layers.Reshape([-1, frequency_dim, 1])
     self.frequencyFC = tf.keras.layers.Dense(frequency_dim, name=name+"/FFC")
     self.concat_FFCout_and_In = tf.keras.layers.Concatenate(-1)
-    self.out_conv2d = tf.keras.layers.Conv2d(channel_in_out, [1,1], padding="same",
+
+    self.out_conv2d = tf.keras.layers.Conv2D(channel_in_out, [1,1], padding="same",
                                              name=name+"/out_conv2d")
+    self.out_conv2d_bna = BatchNormAndActivate(name=name+"/out_conv2d_bna")
 
   def __call__(self, feature_in):
     '''
     feature_n: [batch, T, F, channel_in_out]
     '''
     att_out = self.att_conv2d_1(feature_in)
+    att_out = self.att_conv2d_1_bna(att_out)
+
     att_out = self.att_inner_reshape(att_out)
     att_out = self.att_conv1d_2(att_out)
+    att_out = self.att_conv1d_2_bna(att_out)
+    att_out = self.att_out_reshape(att_out)
+
     atted_out = tf.multiply(feature_in, att_out) # [batch, T, F, channel_in_out]
     atted_out_T = tf.transpose(atted_out, perm=[0,1,3,2]) # [batch, T, channel_in_out, F]
     ffc_out_T = self.frequencyFC(atted_out_T)
     ffc_out = tf.transpose(ffc_out_T, perm=[0,1,3,2]) # [batch, T, F, channel_in_out]
     concated_out = self.concat_FFCout_and_In([feature_in, ffc_out])
+
     out = self.out_conv2d(concated_out)
+    out = self.out_conv2d_bna(out)
     return out
 
 
 class InfoCommunicate:
-  def __init__(self, channel_out, activate_fn=tf.nn.tanh, name='InfoC'):
-    self.conv2d = tf.keras.layers.Conv2d(channel_out, [1, 1], padding="same", name=name+"/conv2d")
+  def __init__(self, channel_out, activate_fn=tf.keras.activations.tanh, name='InfoC'):
+    self.conv2d = tf.keras.layers.Conv2D(channel_out, [1, 1], padding="same", name=name+"/conv2d")
     self.activate_fn = activate_fn
 
   def __call__(self, feature_x1, feature_x2):
@@ -80,26 +101,39 @@ class InfoCommunicate:
 class TwoStreamBlock:
   def __init__(self, frequency_dim, channel_in_out_A, channel_in_out_P, name="TSB"):
     self.sA1_pre_FTB = FrequencyTransformationBlock(frequency_dim, channel_in_out_A, name=name+"/sA1_pre_FTB")
-    self.sA2_conv2d = tf.keras.layers.Conv2d(channel_in_out_A, [5, 5], padding="same", name=name+"/sA2_conv2d")
-    self.sA3_conv2d = tf.keras.layers.Conv2d(channel_in_out_A, [25, 1], padding="same", name=name+"/sA3_conv2d")
-    self.sA4_conv2d = tf.keras.layers.Conv2d(channel_in_out_A, [5, 5], padding="same", name=name+"/sA4_conv2d")
+    self.sA2_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [5, 5], padding="same", name=name+"/sA2_conv2d")
+    self.sA2_conv2d_bna = BatchNormAndActivate(name=name+"/sA2_conv2d_bna")
+    self.sA3_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [25, 1], padding="same", name=name+"/sA3_conv2d")
+    self.sA3_conv2d_bna = BatchNormAndActivate(name=name+"/sA3_conv2d_bna")
+    self.sA4_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [5, 5], padding="same", name=name+"/sA4_conv2d")
+    self.sA4_conv2d_bna = BatchNormAndActivate(name=name+"/sA4_conv2d_bna")
     self.sA5_post_FTB = FrequencyTransformationBlock(frequency_dim, channel_in_out_A, name=name+"/sA5_post_FTB")
     self.sA6_info_communicate = InfoCommunicate(channel_in_out_A, name=name+"/InfoC_A")
 
-    self.sP1_conv2d = tf.keras.layers.Conv2d(channel_in_out_P, [5, 3], padding="same", name=name+"/sP1_conv2d")
-    self.sP2_conv2d = tf.keras.layers.Conv2d(channel_in_out_P, [25, 1], padding="same", name=name+"/sP2_conv2d")
+    self.sP1_conv2d_before_LN = tf.keras.layers.LayerNormalization(-1, name=name+"/sP1_conv2d_before_LN")
+    self.sP1_conv2d = tf.keras.layers.Conv2D(channel_in_out_P, [5, 3], padding="same", name=name+"/sP1_conv2d")
+    self.sP2_conv2d_before_LN = tf.keras.layers.LayerNormalization(-1, name=name+"/sP2_conv2d_before_LN")
+    self.sP2_conv2d = tf.keras.layers.Conv2D(channel_in_out_P, [25, 1], padding="same", name=name+"/sP2_conv2d")
     self.sP3_info_communicate = InfoCommunicate(channel_in_out_P, name=name+"/InfoC_P")
 
   def __call__(self, feature_sA, feature_sP):
+    # Stream A
     sA_out = self.sA1_pre_FTB(feature_sA)
     sA_out = self.sA2_conv2d(sA_out)
+    sA_out = self.sA2_conv2d_bna(sA_out)
     sA_out = self.sA3_conv2d(sA_out)
+    sA_out = self.sA3_conv2d_bna(sA_out)
     sA_out = self.sA4_conv2d(sA_out)
+    sA_out = self.sA4_conv2d_bna(sA_out)
     sA_out = self.sA5_post_FTB(sA_out)
 
-    sP_out = self.sP1_conv2d(feature_sP)
+    # Strean P
+    sP_out = self.sP1_conv2d_before_LN(feature_sP)
+    sP_out = self.sP1_conv2d(sP_out)
+    sP_out = self.sP2_conv2d_before_LN(feature_sP)
     sP_out = self.sP2_conv2d(sP_out)
 
+    # information communication
     sA_fin_out = self.sA6_info_communicate(sA_out, sP_out)
     sP_fin_out = self.sP3_info_communicate(sP_out, sA_out)
 
@@ -111,7 +145,7 @@ class StreamAmplitude_PostNet:
     self.layer_sequences = []
 
     self.layer_sequences.append(
-        tf.keras.layers.Conv2d(8, [1, 1], padding="same", name=name+"/p1_conv2d"))
+        tf.keras.layers.Conv2D(8, [1, 1], padding="same", name=name+"/p1_conv2d"))
     self.layer_sequences.append(tf.keras.layers.Reshape([-1, frequency_dim * 8]))
 
     fw_lstm = tf.keras.layers.LSTM(512, dropout=0.2, implementation=2,
@@ -123,11 +157,12 @@ class StreamAmplitude_PostNet:
                                       merge_mode='concat', name=name+'/p2_blstm'))
 
     self.layer_sequences.append(
-        tf.keras.layers.Dense(600, activation=tf.nn.relu, name=name+"/p3_dense"))
+        tf.keras.layers.Dense(600, activation=tf.keras.activations.relu, name=name+"/p3_dense"))
     self.layer_sequences.append(
-        tf.keras.layers.Dense(600, activation=tf.nn.relu, name=name+"/p4_dense"))
+        tf.keras.layers.Dense(600, activation=tf.keras.activations.relu, name=name+"/p4_dense"))
     self.layer_sequences.append(
-        tf.keras.layers.Dense(frequency_dim, activation=tf.nn.sigmoid, name=name+"/out_dense"))
+        tf.keras.layers.Dense(frequency_dim, activation=tf.keras.activations.sigmoid,
+                              name=name+"/out_dense"))
 
   def __call__(self, feature_sA):
     '''
@@ -156,8 +191,8 @@ class StreamPhase_PostNet:
     out_complex = tf.complex(out[..., 0], out[..., 1])
     out_abs = tf.abs(out_complex)
     out_abs = tf.expand_dims(out_abs, -1)
-    normed_out = out / out_abs    # TODO: be careful, out_abs may contain zeors !
-    # normed_out = out / (out_abs + 1e-16)
+    # normed_out = out / out_abs    # TODO: be careful, out_abs may contain zeors !
+    normed_out = out / (out_abs + 1e-16)
     return normed_out
 
 
@@ -252,10 +287,12 @@ class PHASEN(Module):
 
     est_clean_mag_batch = net_phasen_out.mag
     est_complexPhase_batch = net_phasen_out.normalized_complex_phase
-    est_clean_stft_batch = tf.multiply(est_clean_mag_batch, est_complexPhase_batch)
+    est_clean_stft_batch = tf.multiply(tf.expand_dims(est_clean_mag_batch, -1), est_complexPhase_batch)
     est_clean_stft_batch = tf.complex(est_clean_stft_batch[..., 0], est_clean_stft_batch[..., 1])
     est_clean_wav_batch = misc_utils.tf_stft2wav(est_clean_stft_batch, PARAM.frame_length,
                                                  PARAM.frame_step, PARAM.fft_length)
+    _mixed_wav_length = tf.shape(self.mixed_wav_batch)[1]
+    est_clean_wav_batch = est_clean_wav_batch[:, :_mixed_wav_length]
 
     return FrowardOutputs(est_clean_stft_batch,
                           est_clean_mag_batch,
@@ -263,7 +300,7 @@ class PHASEN(Module):
                           est_complexPhase_batch)
 
 
-  def get_losses(self):
+  def _get_losses(self):
     est_clean_mag_batch = self._forward_outputs.est_clean_mag_batch
     est_clean_stft_batch = self._forward_outputs.est_clean_stft_batch
     est_clean_wav_batch = self._forward_outputs.est_clean_wav_batch

@@ -179,20 +179,21 @@ def main():
   g.finalize()
 
   config = tf.compat.v1.ConfigProto()
-  # config.gpu_options.allow_growth = PARAM.GPU_RAM_ALLOW_GROWTH
-  config.gpu_options.per_process_gpu_memory_fraction = PARAM.GPU_PARTION
+  config.gpu_options.allow_growth = PARAM.GPU_RAM_ALLOW_GROWTH
+  # config.gpu_options.per_process_gpu_memory_fraction = PARAM.GPU_PARTION
   config.allow_soft_placement = False
   sess = tf.compat.v1.Session(config=config, graph=g)
   sess.run(init)
 
   # region validation before training
   sess.run(val_inputs.initializer)
+  misc_utils.print_log("\n\nsum_losses: "+str(PARAM.sum_losses)+"\n", train_log_file)
   misc_utils.print_log("stop criterion losses: "+str(PARAM.stop_criterion_losses)+"\n", train_log_file)
   misc_utils.print_log("show losses: "+str(PARAM.show_losses)+"\n", train_log_file)
   evalOutputs_prev = eval_one_epoch(sess, val_model)
   misc_utils.print_log("                                            "
                        "                                            "
-                       "                                         \n\n",
+                       "                                         \n",
                        train_log_file, no_time=True)
   val_msg = "PRERUN.val> sum_loss:%.4F, stop_loss:%.4F, show_losses:%s, Cost itme:%.2Fs.\n" % (
       evalOutputs_prev.sum_loss,
