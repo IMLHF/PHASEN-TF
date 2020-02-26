@@ -236,8 +236,8 @@ class PHASEN(Module):
     sA_out = self.streamA_postnet(sA_out) # [batch, t, f]
     sP_out = self.streamP_postnet(sP_out) # [batch, t, f, 2]
 
-    est_mag = tf.multiply(self.mixed_mag_batch, sA_out)
-    normed_complex_phase = tf.complex(sP_out[..., 0], sP_out[..., 1])
+    est_mag = tf.multiply(self.mixed_mag_batch, sA_out) # [batch, t, f]
+    normed_complex_phase = sP_out # [batch, t, f, 2]
     return NET_PHASEN_OUT(mag=est_mag,
                           normalized_complex_phase=normed_complex_phase)
 
@@ -252,25 +252,31 @@ class PHASEN(Module):
 
     est_clean_mag_batch = net_phasen_out.mag
     est_complexPhase_batch = net_phasen_out.normalized_complex_phase
-    est_clean_stft_batch = tf.multiply(tf.complex(est_clean_mag_batch, 0.0), est_complexPhase_batch)
+    est_clean_stft_batch = tf.multiply(est_clean_mag_batch, est_complexPhase_batch)
     est_clean_stft_batch = tf.complex(est_clean_stft_batch[..., 0], est_clean_stft_batch[..., 1])
     est_clean_wav_batch = misc_utils.tf_stft2wav(est_clean_stft_batch, PARAM.frame_length,
                                                  PARAM.frame_step, PARAM.fft_length)
 
     return FrowardOutputs(est_clean_stft_batch,
                           est_clean_mag_batch,
-                          est_clean_wav_batch)
+                          est_clean_wav_batch,
+                          est_complexPhase_batch)
 
 
   def get_losses(self):
-    clean_mag_batch_label = self.clean_mag_batch
     est_clean_mag_batch = self._forward_outputs.est_clean_mag_batch
     est_clean_stft_batch = self._forward_outputs.est_clean_stft_batch
     est_clean_wav_batch = self._forward_outputs.est_clean_wav_batch
+    est_complexPhase_batch = self._forward_outputs.est_complexPhase_batch
 
     # region losses
-    self.loss_mag_mse = losses.batch_time_fea_real_mse(est_clean_mag_batch, clean_mag_batch_label)
-    self.loss_mag_reMse = losses.batch_real_relativeMSE(est_clean_mag_batch, clean_mag_batch_label,
+    self.loss_compressedMag_mse = losses.batch_time_compressedMag_mse(est_clean_mag_batch,
+                                                                      self.clean_mag_batch,
+                                                                      PARAM.loss_compressedMag_idx)
+    self.loss_complexPhase_mse = losses.batch_time_fea_real_mse(est_complexPhase_batch,
+                                                                self.clean_complexPhase_batch)
+    self.loss_mag_mse = losses.batch_time_fea_real_mse(est_clean_mag_batch, self.clean_mag_batch)
+    self.loss_mag_reMse = losses.batch_real_relativeMSE(est_clean_mag_batch, self.clean_mag_batch,
                                                         PARAM.relative_loss_epsilon, PARAM.RL_idx)
     self.loss_stft_mse = losses.batch_time_fea_complex_mse(est_clean_stft_batch, self.clean_stft_batch)
     self.loss_stft_reMse = losses.batch_complex_relativeMSE(est_clean_stft_batch, self.clean_stft_batch,
@@ -290,6 +296,8 @@ class PHASEN(Module):
                                                                          PARAM.st_frame_length_for_loss,
                                                                          PARAM.st_frame_step_for_loss)
     loss_dict = {
+        'loss_compressedMag_mse': self.loss_compressedMag_mse,
+        'loss_complexPhase_mse': self.loss_complexPhase_mse,
         'loss_mag_mse': self.loss_mag_mse,
         'loss_mag_reMse': self.loss_mag_reMse,
         'loss_stft_mse': self.loss_stft_mse,
