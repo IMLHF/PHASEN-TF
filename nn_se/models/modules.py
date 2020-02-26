@@ -9,7 +9,7 @@ from ..utils import misc_utils
 class FrowardOutputs(
     collections.namedtuple("FrowardOutputs",
                            ("est_clean_stft_batch", "est_clean_mag_batch",
-                            "est_clean_wav_batch"))):
+                            "est_clean_wav_batch", "est_complexPhase_batch"))):
   pass
 
 class Losses(
@@ -48,6 +48,7 @@ class Module(object):
                                                      PARAM.frame_step)
       self.clean_mag_batch = tf.abs(self.clean_stft_batch)
       self.clean_angle_batch = tf.angle(self.clean_stft_batch)
+      self.clean_complexPhase_batch = self.clean_stft_batch / tf.complex(self.clean_mag_batch, 0.0)
 
     # create required variables
     self._init_variables()
