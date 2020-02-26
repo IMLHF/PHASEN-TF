@@ -8,6 +8,17 @@ def vec_normal(y):
   normal_ = tf.sqrt(tf.reduce_sum(tf.square(y), -1))
   return normal_
 
+def batch_time_compressedMag_mse(y1, y2, compress_idx):
+  """
+  y1>=0: real, [batch, time, feature_dim]
+  y2>=0: real, [batch, time, feature_dim]
+  """
+  y1 = tf.pow(y1, compress_idx)
+  y2 = tf.pow(y2, compress_idx)
+  loss = tf.square(y1-y2)
+  loss = tf.reduce_mean(tf.reduce_sum(loss, 0))
+  return loss
+
 def batch_time_fea_real_mse(y1, y2):
   """
   y1: real, [batch, time, feature_dim]
