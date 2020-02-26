@@ -32,8 +32,6 @@ class Module(object):
                noise_wav_batch=None):
     del noise_wav_batch
     self.mode = mode
-    self.__var_se_net_scope = 'se_net/'
-    self._init_variables()
 
     self.mixed_wav_batch = mixed_wav_batch
     self.mixed_stft_batch = misc_utils.tf_wav2stft(self.mixed_wav_batch,
@@ -41,6 +39,7 @@ class Module(object):
                                                    PARAM.frame_step)
     self.mixed_mag_batch = tf.abs(self.mixed_stft_batch)
     self.mixed_angle_batch = tf.angle(self.mixed_stft_batch)
+    self.batch_size = tf.shape(self.mixed_wav_batch)[0]
 
     if clean_wav_batch is not None:
       self.clean_wav_batch = clean_wav_batch
@@ -50,14 +49,20 @@ class Module(object):
       self.clean_mag_batch = tf.abs(self.clean_stft_batch)
       self.clean_angle_batch = tf.angle(self.clean_stft_batch)
 
+    # create required variables
+    self._init_variables()
 
-    # global_step, lr, vars
-    with tf.compat.v1.variable_scope("notrain_var", reuse=tf.compat.v1.AUTO_REUSE):
+    # global_step, lr, notrainable variables
+    with tf.compat.v1.variable_scope("notrain_vars", reuse=tf.compat.v1.AUTO_REUSE):
       self._global_step = tf.compat.v1.get_variable('global_step', dtype=tf.int32,
                                                     initializer=tf.constant(1), trainable=False)
       self._lr = tf.compat.v1.get_variable('lr', dtype=tf.float32, trainable=False,
                                            initializer=tf.constant(PARAM.learning_rate))
     self.save_variables = [self.global_step, self._lr]
+    self.save_variables.extend(tf.compat.v1.trainable_variables())
+    self.saver = tf.compat.v1.train.Saver(self.save_variables,
+                                          max_to_keep=PARAM.max_keep_ckpt,
+                                          save_relative_paths=True)
 
     # for lr halving
     self._new_lr = tf.compat.v1.placeholder(tf.float32, name='new_lr')
@@ -71,24 +76,10 @@ class Module(object):
     self._forward_outputs = self._forward()
     self._est_clean_wav_batch = self._forward_outputs.est_clean_wav_batch
 
-
     # get loss
     if mode != PARAM.MODEL_INFER_KEY:
       # losses
       self._losses = self._get_losses()
-      self._sum_loss = self._losses.sum_loss
-
-    # trainable_variables = tf.compat.v1.trainable_variables()
-    self.se_net_params = tf.compat.v1.trainable_variables(scope=self.__var_se_net_scope)
-
-    if mode == PARAM.MODEL_TRAIN_KEY:
-      print("\nSE PARAMs")
-      misc_utils.show_variables(self.se_net_params)
-
-    self.save_variables.extend(self.se_net_params)
-    self.saver = tf.compat.v1.train.Saver(self.save_variables,
-                                          max_to_keep=PARAM.max_keep_ckpt,
-                                          save_relative_paths=True)
 
 
   @abc.abstractmethod
@@ -134,9 +125,6 @@ class Module(object):
   def global_step(self):
     return self._global_step
 
-  @property
-  def mixed_wav_batch_in(self):
-    return self.mixed_wav_batch
 
   @property
   def train_op(self):
