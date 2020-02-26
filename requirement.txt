@@ -1,0 +1,6 @@
+tensorflow-gpu==1.14
+soundfile==0.10.2
+tqdm==4.36.1
+librosa==0.7.0
+pystoi==0.2.2
+mir_eval==0.5
