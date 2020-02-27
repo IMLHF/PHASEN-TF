@@ -1,9 +1,6 @@
 import tensorflow as tf
 import collections
 
-from .modules import Module
-from .modules import FrowardOutputs
-from .modules import Losses
 from ..FLAGS import PARAM
 from ..utils import losses
 from ..utils import misc_utils
@@ -204,6 +201,17 @@ class NET_PHASEN_OUT(
                            ("mag", "normalized_complex_phase"))):
   pass
 
+class FrowardOutputs(
+    collections.namedtuple("FrowardOutputs",
+                           ("est_clean_stft_batch", "est_clean_mag_batch",
+                            "est_clean_wav_batch", "est_complexPhase_batch"))):
+  pass
+
+class Losses(
+    collections.namedtuple("Losses",
+                           ("sum_loss", "show_losses", "stop_criterion_loss"))):
+  pass
+
 def if_grads_is_nan_or_inf(grads):
   grads_is_nan_or_inf_lst = []
   for grad in grads:
@@ -214,21 +222,81 @@ def if_grads_is_nan_or_inf(grads):
   # True if grads_is_nan_or_inf > 0 else False
   return grads_is_nan_or_inf
 
-class PHASEN(Module):
+class PHASEN_Variables(object):
+  def __init__(self, name='PHASEN'):
+    self.streamA_prenet = Stream_PreNet(PARAM.channel_A, PARAM.prenet_A_kernels, name=name+"/streamA_prenet")
+    self.streamP_prenet = Stream_PreNet(PARAM.channel_P, PARAM.prenet_P_kernels, name=name+"/streanP_prenet")
+    self.layers_TSB = []
+    for i in range(1, PARAM.n_TSB+1):
+      tsb_t = TwoStreamBlock(PARAM.frequency_dim, PARAM.channel_A, PARAM.channel_P, name=name+("/TSB_%d" % i))
+      self.layers_TSB.append(tsb_t)
+    self.streamA_postnet = StreamAmplitude_PostNet(PARAM.frequency_dim, name=name+"/sA_postnet")
+    self.streamP_postnet = StreamPhase_PostNet(name=name+"/sP_postnet")
+
+class PHASEN(object):
   def __init__(self,
                mode,
+               variables:PHASEN_Variables,
                mixed_wav_batch,
                clean_wav_batch=None,
                noise_wav_batch=None):
-    super(PHASEN, self).__init__(
-        mode,
-        mixed_wav_batch,
-        clean_wav_batch,
-        noise_wav_batch)
+    del noise_wav_batch
+    self.mode = mode
+    self.variables = variables
+
+    self.mixed_wav_batch = mixed_wav_batch
+    self.mixed_stft_batch = misc_utils.tf_wav2stft(self.mixed_wav_batch,
+                                                   PARAM.frame_length,
+                                                   PARAM.frame_step,
+                                                   PARAM.fft_length)
+    self.mixed_mag_batch = tf.abs(self.mixed_stft_batch)
+    self.mixed_angle_batch = tf.angle(self.mixed_stft_batch)
+    self.batch_size = tf.shape(self.mixed_wav_batch)[0]
+
+    if clean_wav_batch is not None:
+      self.clean_wav_batch = clean_wav_batch
+      self.clean_stft_batch = misc_utils.tf_wav2stft(self.clean_wav_batch,
+                                                     PARAM.frame_length,
+                                                     PARAM.frame_step,
+                                                     PARAM.fft_length)
+      self.clean_mag_batch = tf.abs(self.clean_stft_batch)
+      self.clean_angle_batch = tf.angle(self.clean_stft_batch)
+
+    # nn forward
+    self._forward_outputs = self._forward()
+    self._est_clean_wav_batch = self._forward_outputs.est_clean_wav_batch
+
+    # global_step, lr, notrainable variables
+    with tf.compat.v1.variable_scope("notrain_vars", reuse=tf.compat.v1.AUTO_REUSE):
+      self._global_step = tf.compat.v1.get_variable("global_step", dtype=tf.int32,
+                                                    initializer=tf.constant(1), trainable=False)
+      self._lr = tf.compat.v1.get_variable("lr", dtype=tf.float32, trainable=False,
+                                           initializer=tf.constant(PARAM.learning_rate))
+
+    self.save_variables = [self.lr, self._global_step]
+    self.save_variables.extend(tf.compat.v1.trainable_variables())
+    self.saver = tf.compat.v1.train.Saver(self.save_variables,
+                                          max_to_keep=PARAM.max_keep_ckpt,
+                                          save_relative_paths=True)
+
+    # for lr halving
+    self._new_lr = tf.compat.v1.placeholder(tf.float32, name='new_lr')
+    self._assign_lr = tf.compat.v1.assign(self._lr, self._new_lr)
+
+    # for lr warmup
+    if PARAM.use_lr_warmup:
+      self._lr = misc_utils.noam_scheme(self._lr, self.global_step, warmup_steps=PARAM.warmup_steps)
+
+    # get loss
+    if mode != PARAM.MODEL_INFER_KEY:
+      # losses
+      self._losses = self._get_losses()
+
+    self.variables = variables
 
     # get specific variables
-    self.var_scope = None
-    self.se_net_vars = tf.compat.v1.trainable_variables(self.var_scope)
+    self.se_net_scope = None
+    self.se_net_vars = tf.compat.v1.trainable_variables(scope=self.se_net_scope)
 
     # show specific variables
     if mode == PARAM.MODEL_TRAIN_KEY:
@@ -253,7 +321,6 @@ class PHASEN(Module):
     # all_clipped_grads, _ = tf.clip_by_global_norm(all_grads, PARAM.max_gradient_norm)
     all_clipped_grads = all_grads
 
-
     # choose optimizer
     if PARAM.optimizer == "Adam":
       self._optimizer = tf.compat.v1.train.AdamOptimizer(self._lr)
@@ -269,27 +336,16 @@ class PHASEN(Module):
     self._train_op = self._optimizer.apply_gradients(zip(checked_grads, all_params),
                                                      global_step=self.global_step)
 
-  def _init_variables(self):
-
-    self.streamA_prenet = Stream_PreNet(PARAM.channel_A, PARAM.prenet_A_kernels, name='streamA_prenet')
-    self.streamP_prenet = Stream_PreNet(PARAM.channel_P, PARAM.prenet_P_kernels, name='streanP_prenet')
-    self.layers_TSB = []
-    for i in range(1, PARAM.n_TSB+1):
-      tsb_t = TwoStreamBlock(PARAM.frequency_dim, PARAM.channel_A, PARAM.channel_P, name="TSB_%d" % i)
-      self.layers_TSB.append(tsb_t)
-    self.streamA_postnet = StreamAmplitude_PostNet(PARAM.frequency_dim, name="sA_postnet")
-    self.streamP_postnet = StreamPhase_PostNet(name="sP_postnet")
-
   def _net_PHASEN(self, feature_in):
     '''
     return mag_batch[batch, time, fre]->real, normalized_complex_phase[batch, time, fre]->complex
     '''
-    sA_out = self.streamA_prenet(feature_in) # [batch, t, f, Ca]
-    sP_out = self.streamP_prenet(feature_in) # [batch, t, f, Cp]
-    for tsb in self.layers_TSB:
+    sA_out = self.variables.streamA_prenet(feature_in) # [batch, t, f, Ca]
+    sP_out = self.variables.streamP_prenet(feature_in) # [batch, t, f, Cp]
+    for tsb in self.variables.layers_TSB:
       sA_out, sP_out = tsb(sA_out, sP_out)
-    sA_out = self.streamA_postnet(sA_out) # [batch, t, f]
-    sP_out = self.streamP_postnet(sP_out) # [batch, t, f, 2]
+    sA_out = self.variables.streamA_postnet(sA_out) # [batch, t, f]
+    sP_out = self.variables.streamP_postnet(sP_out) # [batch, t, f, 2]
 
     est_mag = tf.multiply(self.mixed_mag_batch, sA_out) # [batch, t, f]
     normed_complex_phase = sP_out # [batch, t, f, 2]
@@ -317,7 +373,6 @@ class PHASEN(Module):
                           est_clean_mag_batch,
                           est_clean_wav_batch,
                           est_complexPhase_batch)
-
 
   def _get_losses(self):
     est_clean_mag_batch = self._forward_outputs.est_clean_mag_batch
@@ -403,3 +458,27 @@ class PHASEN(Module):
     return Losses(sum_loss=sum_loss,
                   show_losses=show_losses,
                   stop_criterion_loss=stop_criterion_losses_sum)
+
+  def change_lr(self, sess, new_lr):
+    sess.run(self._assign_lr, feed_dict={self.new_lr:new_lr})
+
+  @property
+  def global_step(self):
+    return self._global_step
+
+
+  @property
+  def train_op(self):
+    return self._train_op
+
+  @property
+  def losses(self):
+    return self._losses
+
+  @property
+  def lr(self):
+    return self._lr
+
+  @property
+  def est_clean_wav_batch(self):
+    return self._est_clean_wav_batch

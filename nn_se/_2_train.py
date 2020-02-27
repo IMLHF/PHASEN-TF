@@ -8,7 +8,6 @@ import sys
 
 
 from .models import model_builder
-from .models import modules
 from .dataloader import dataloader
 from .utils import misc_utils
 from .FLAGS import PARAM
@@ -183,11 +182,12 @@ def main():
       val_inputs = dataloader.get_batch_inputs_from_nosiyCleanDataset(noisy_valset_wav,
                                                                       clean_valset_wav)
 
-    ModelC = model_builder.get_model_class_and_var()
+    ModelC, VarC = model_builder.get_model_class_and_var()
+    variablesObj = VarC()
 
-    train_model = ModelC(PARAM.MODEL_TRAIN_KEY, train_inputs.mixed, train_inputs.clean)
+    train_model = ModelC(PARAM.MODEL_TRAIN_KEY, variablesObj, train_inputs.mixed, train_inputs.clean)
     # tf.compat.v1.get_variable_scope().reuse_variables()
-    val_model = ModelC(PARAM.MODEL_VALIDATE_KEY, val_inputs.mixed,val_inputs.clean)
+    val_model = ModelC(PARAM.MODEL_VALIDATE_KEY, variablesObj, val_inputs.mixed,val_inputs.clean)
     init = tf.group(tf.compat.v1.global_variables_initializer(),
                     tf.compat.v1.local_variables_initializer())
     # misc_utils.show_variables(train_model.save_variables)
