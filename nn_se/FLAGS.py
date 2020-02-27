@@ -49,7 +49,7 @@ class BaseConfig(StaticKey):
   relative_loss_epsilon = 0.1
   RL_idx = 2.0
   st_frame_length_for_loss = 512
-  st_frame_step_for_loss = 128
+  st_frame_step_for_loss = 256
   sampling_rate = 16000
   frame_length = 400
   frame_step = 160
@@ -60,7 +60,7 @@ class BaseConfig(StaticKey):
   max_gradient_norm = 5.0
 
   GPU_RAM_ALLOW_GROWTH = True
-  GPU_PARTION = 0.45
+  GPU_PARTION = 0.97
 
   s_epoch = 1
   max_epoch = 40
@@ -83,11 +83,11 @@ class BaseConfig(StaticKey):
   loss_mag_reMse, loss_reSpecMse, loss_reWavL2,
   loss_sdrV1, loss_sdrV2, loss_stSDRV3, loss_cosSimV1, loss_cosSimV2,
   """
-  sum_losses = ["loss_compressedMag_mse", "loss_complexPhase_mse"]
+  sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   sum_losses_w = []
-  show_losses = ["loss_compressedMag_mse", "loss_complexPhase_mse"]
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   show_losses_w = []
-  stop_criterion_losses = ["loss_compressedMag_mse", "loss_complexPhase_mse"]
+  stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   stop_criterion_losses_w = []
 
   # just for "DISCRIMINATOR_AD_MODEL"
@@ -101,30 +101,44 @@ class BaseConfig(StaticKey):
   loss_compressedMag_idx = 0.3
 
 
-
 class p40(BaseConfig):
   n_processor_gen_tfrecords = 56
   n_processor_tfdata = 8
-  GPU_PARTION = 0.225
+  # GPU_PARTION = 0.27
   root_dir = '/home/zhangwenbo5/lihongfeng/PHASEN'
 
 
-class se_magMSE(p40): # done p40
+class se_phasen_001(p40): # runnning p40
   '''
-  mag mse
+  phasen 001
   '''
-  GPU_PARTION = 0.23
-  losses_position = ['not_transformed_losses']
-  not_transformed_losses = ['loss_mag_mse']
-  # relative_loss_epsilon = 0.1
-  blstm_layers = 3
-  # transformed_losses = ['FTloss_mag_mse']
-  # FT_type = ["LogValueT"]
-  # add_FeatureTrans_in_SE_inputs = False
+  sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  sum_losses_w = []
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  show_losses_w = []
+  stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  stop_criterion_losses_w = []
+  channel_A = 24
+  channel_P = 12
+  n_TSB = 3
 
-  stop_criterion_losses = ['loss_mag_mse']
-  show_losses = ['loss_mag_mse']
+class se_phasen_002(p40): # runnning p40
+  '''
+  phasen 002
+  loss_mag_reMse|0050 + loss_CosSim
+  '''
+  sum_losses = ["loss_mag_reMse", "loss_CosSim"]
+  sum_losses_w = []
+  show_losses = ["loss_mag_reMse", "loss_CosSim"]
+  show_losses_w = []
+  stop_criterion_losses = ["loss_mag_reMse", "loss_CosSim"]
+  stop_criterion_losses_w = []
+  relative_loss_epsilon = 0.05
+  channel_A = 24
+  channel_P = 12
+  n_TSB = 3
 
-PARAM = se_magMSE
+
+PARAM = se_phasen_002
 
 # CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=4 python -m xxx._2_train

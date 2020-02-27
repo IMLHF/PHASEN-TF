@@ -87,15 +87,18 @@ class FrequencyTransformationBlock:
 class InfoCommunicate:
   def __init__(self, channel_out, activate_fn=tf.keras.activations.tanh, name='InfoC'):
     self.conv2d = tf.keras.layers.Conv2D(channel_out, [1, 1], padding="same", name=name+"/conv2d")
+    # self.bn = tf.keras.layers.BatchNormalization(-1, name=name+"/BN")
     self.activate_fn = activate_fn
 
   def __call__(self, feature_x1, feature_x2):
     # feature_x1: [batch, T, F, channel_out]
     # feature_x2: [batch, T, F, Cp or Ca]
     # return: [batch, T, F, channel_out]
-    out = self.activate_fn(self.conv2d(feature_x2))
-    out = tf.multiply(feature_x1, out)
-    return out
+    conv_out = self.conv2d(feature_x2)
+    act_out = self.activate_fn(conv_out)
+
+    out_multiply = tf.multiply(feature_x1, act_out)
+    return out_multiply
 
 
 class TwoStreamBlock:
@@ -118,7 +121,8 @@ class TwoStreamBlock:
 
   def __call__(self, feature_sA, feature_sP):
     # Stream A
-    sA_out = self.sA1_pre_FTB(feature_sA)
+    sA_out = feature_sA
+    sA_out = self.sA1_pre_FTB(sA_out)
     sA_out = self.sA2_conv2d(sA_out)
     sA_out = self.sA2_conv2d_bna(sA_out)
     sA_out = self.sA3_conv2d(sA_out)
@@ -128,9 +132,10 @@ class TwoStreamBlock:
     sA_out = self.sA5_post_FTB(sA_out)
 
     # Strean P
-    sP_out = self.sP1_conv2d_before_LN(feature_sP)
+    sP_out = feature_sP
+    sP_out = self.sP1_conv2d_before_LN(sP_out)
     sP_out = self.sP1_conv2d(sP_out)
-    sP_out = self.sP2_conv2d_before_LN(feature_sP)
+    sP_out = self.sP2_conv2d_before_LN(sP_out)
     sP_out = self.sP2_conv2d(sP_out)
 
     # information communication
@@ -182,17 +187,15 @@ class StreamPhase_PostNet:
 
   def __call__(self, feature_sP):
     '''
-    return [batch, T, F, 2]
+    return [batch, T, F]->complex
     '''
     out = feature_sP
     for layer_fn in self.layer_sequences:
       out = layer_fn(out)
     # out: [batch, T, F, 2]
     out_complex = tf.complex(out[..., 0], out[..., 1])
-    out_abs = tf.abs(out_complex)
-    out_abs = tf.expand_dims(out_abs, -1)
-    # normed_out = out / out_abs    # TODO: be careful, out_abs may contain zeors !
-    normed_out = out / (out_abs + 1e-16)
+    out_angle = tf.angle(out_complex)
+    normed_out = tf.exp(tf.complex(0.0, out_angle))
     return normed_out
 
 
@@ -201,6 +204,15 @@ class NET_PHASEN_OUT(
                            ("mag", "normalized_complex_phase"))):
   pass
 
+def if_grads_is_nan_or_inf(grads):
+  grads_is_nan_or_inf_lst = []
+  for grad in grads:
+    nan_or_inf = tf.reduce_max(tf.cast(tf.math.is_nan(grad), tf.int32)) + \
+        tf.reduce_max(tf.cast(tf.math.is_inf(grad), tf.int32))
+    grads_is_nan_or_inf_lst.append(nan_or_inf)
+  grads_is_nan_or_inf = tf.stack(grads_is_nan_or_inf_lst)
+  # True if grads_is_nan_or_inf > 0 else False
+  return grads_is_nan_or_inf
 
 class PHASEN(Module):
   def __init__(self,
@@ -238,7 +250,9 @@ class PHASEN(Module):
     all_grads = se_loss_grads
     all_params = self.se_net_vars
 
-    all_clipped_grads, _ = tf.clip_by_global_norm(all_grads, PARAM.max_gradient_norm)
+    # all_clipped_grads, _ = tf.clip_by_global_norm(all_grads, PARAM.max_gradient_norm)
+    all_clipped_grads = all_grads
+
 
     # choose optimizer
     if PARAM.optimizer == "Adam":
@@ -246,7 +260,13 @@ class PHASEN(Module):
     elif PARAM.optimizer == "RMSProp":
       self._optimizer = tf.compat.v1.train.RMSPropOptimizer(self._lr)
 
-    self._train_op = self._optimizer.apply_gradients(zip(all_clipped_grads, all_params),
+    self._grads_bad_lst = if_grads_is_nan_or_inf(all_clipped_grads)
+    self._grads_bad = tf.greater(tf.reduce_max(self._grads_bad_lst), 0)
+    self._grads_coef = tf.cond(self._grads_bad,
+                               lambda: tf.constant(0.0),
+                               lambda: tf.constant(1.0))
+    checked_grads = [tf.math.multiply_no_nan(grad, self._grads_coef) for grad in all_clipped_grads]
+    self._train_op = self._optimizer.apply_gradients(zip(checked_grads, all_params),
                                                      global_step=self.global_step)
 
   def _init_variables(self):
@@ -262,7 +282,7 @@ class PHASEN(Module):
 
   def _net_PHASEN(self, feature_in):
     '''
-    return mag_batch[batch, time, fre], normalized_complex_phase[batch, time, fre, 2]
+    return mag_batch[batch, time, fre]->real, normalized_complex_phase[batch, time, fre]->complex
     '''
     sA_out = self.streamA_prenet(feature_in) # [batch, t, f, Ca]
     sP_out = self.streamP_prenet(feature_in) # [batch, t, f, Cp]
@@ -287,8 +307,7 @@ class PHASEN(Module):
 
     est_clean_mag_batch = net_phasen_out.mag
     est_complexPhase_batch = net_phasen_out.normalized_complex_phase
-    est_clean_stft_batch = tf.multiply(tf.expand_dims(est_clean_mag_batch, -1), est_complexPhase_batch)
-    est_clean_stft_batch = tf.complex(est_clean_stft_batch[..., 0], est_clean_stft_batch[..., 1])
+    est_clean_stft_batch = tf.multiply(tf.complex(est_clean_mag_batch, 0.0), est_complexPhase_batch)
     est_clean_wav_batch = misc_utils.tf_stft2wav(est_clean_stft_batch, PARAM.frame_length,
                                                  PARAM.frame_step, PARAM.fft_length)
     _mixed_wav_length = tf.shape(self.mixed_wav_batch)[1]
@@ -304,14 +323,15 @@ class PHASEN(Module):
     est_clean_mag_batch = self._forward_outputs.est_clean_mag_batch
     est_clean_stft_batch = self._forward_outputs.est_clean_stft_batch
     est_clean_wav_batch = self._forward_outputs.est_clean_wav_batch
-    est_complexPhase_batch = self._forward_outputs.est_complexPhase_batch
+    # est_complexPhase_batch = self._forward_outputs.est_complexPhase_batch
 
     # region losses
     self.loss_compressedMag_mse = losses.batch_time_compressedMag_mse(est_clean_mag_batch,
                                                                       self.clean_mag_batch,
                                                                       PARAM.loss_compressedMag_idx)
-    self.loss_complexPhase_mse = losses.batch_time_fea_real_mse(est_complexPhase_batch,
-                                                                self.clean_complexPhase_batch)
+    self.loss_compressedStft_mse = losses.batch_time_compressedStft_mse(est_clean_stft_batch,
+                                                                        self.clean_stft_batch,
+                                                                        PARAM.loss_compressedMag_idx)
     self.loss_mag_mse = losses.batch_time_fea_real_mse(est_clean_mag_batch, self.clean_mag_batch)
     self.loss_mag_reMse = losses.batch_real_relativeMSE(est_clean_mag_batch, self.clean_mag_batch,
                                                         PARAM.relative_loss_epsilon, PARAM.RL_idx)
@@ -334,7 +354,7 @@ class PHASEN(Module):
                                                                          PARAM.st_frame_step_for_loss)
     loss_dict = {
         'loss_compressedMag_mse': self.loss_compressedMag_mse,
-        'loss_complexPhase_mse': self.loss_complexPhase_mse,
+        'loss_compressedStft_mse': self.loss_compressedStft_mse,
         'loss_mag_mse': self.loss_mag_mse,
         'loss_mag_reMse': self.loss_mag_reMse,
         'loss_stft_mse': self.loss_stft_mse,

@@ -25,6 +25,7 @@ class TrainOutputs(
                            ("sum_loss", "stop_c_loss", "show_losses", "cost_time", "lr"))):
   pass
 
+grads_nan_time = 0
 
 def train_one_epoch(sess, train_model, train_log_file):
   i, lr = 0, -1
@@ -40,12 +41,26 @@ def train_one_epoch(sess, train_model, train_log_file):
   total_i = PARAM.n_train_set_records//PARAM.batch_size
   while True:
     try:
-      _, lr, sum_loss, show_losses, stop_c_loss = sess.run(
-          [train_model.train_op,
-           train_model.lr,
-           train_model.losses.sum_loss,
-           train_model.losses.show_losses,
-           train_model.losses.stop_criterion_loss])
+      (lr, sum_loss, show_losses, stop_c_loss, _,
+       grads_bad, grads_bad_lst
+       ) = sess.run(
+          [
+              train_model.lr,
+              train_model.losses.sum_loss,
+              train_model.losses.show_losses,
+              train_model.losses.stop_criterion_loss,
+              train_model.train_op,
+              train_model._grads_bad,
+              train_model._grads_bad_lst,
+           ])
+      if grads_bad:
+        global grads_nan_time
+        grads_nan_time += 1
+        grads_nan_time_dir = misc_utils.exp_configName_dir().joinpath("grads_nan_time")
+        np.save(grads_nan_time_dir, np.array(grads_nan_time))
+        grads_nan_lst_dir = misc_utils.exp_configName_dir().joinpath("grads_nan_lst.txt")
+        with open(grads_nan_lst_dir, 'a+') as f:
+          f.write(str(grads_bad_lst)+'\n')
 
       if avg_sum_loss is None:
         avg_sum_loss = sum_loss
@@ -57,7 +72,7 @@ def train_one_epoch(sess, train_model, train_log_file):
         avg_stop_c_loss += stop_c_loss
       i += 1
       print("\r", end="")
-      print("train: %d/%d, cost %.2fs, sum_loss %.4f, stop_loss %.4f, show_losses %s  " % (
+      print("train: %d/%d, cost %.2fs, sum_loss %.4f, stop_loss %.4f, show_losses %s           " % (
             i, total_i, time.time()-one_batch_time, sum_loss, stop_c_loss,
             str(np.round(show_losses, 4))),
             flush=True, end="")
@@ -65,7 +80,7 @@ def train_one_epoch(sess, train_model, train_log_file):
       if i % PARAM.batches_to_logging == 0:
         print("\r", end="")
         msg = "     Minbatch %04d: sum_loss:%.4f, stop_loss:%.4f, show_losses:%s, lr:%.2e, time:%ds. \n" % (
-                i, avg_sum_loss/i, stop_c_loss/i, np.round(show_losses/i, 4), lr, time.time()-minbatch_time,
+                i, avg_sum_loss/i, avg_stop_c_loss/i, np.round(avg_show_losses/i, 4), lr, time.time()-minbatch_time,
               )
         minbatch_time = time.time()
         misc_utils.print_log(msg, train_log_file)
@@ -122,9 +137,10 @@ def eval_one_epoch(sess, val_model):
         avg_show_losses += show_losses
         avg_stop_c_loss += stop_c_loss
       i += 1
+      # if i >5 : break
       print("\r", end="")
       print("validate: %d/%d, cost %.2fs, sum_loss %.4f, stop_loss %.4f, show_losses %s"
-            "          " % (
+            "                  " % (
                 i, total_i, time.time()-ont_batch_time, sum_loss, stop_c_loss,
                 str(np.round(show_losses, 4))
             ),
@@ -180,14 +196,15 @@ def main():
 
   config = tf.compat.v1.ConfigProto()
   config.gpu_options.allow_growth = PARAM.GPU_RAM_ALLOW_GROWTH
-  # config.gpu_options.per_process_gpu_memory_fraction = PARAM.GPU_PARTION
+  config.gpu_options.per_process_gpu_memory_fraction = PARAM.GPU_PARTION
   config.allow_soft_placement = False
   sess = tf.compat.v1.Session(config=config, graph=g)
   sess.run(init)
 
   # region validation before training
   sess.run(val_inputs.initializer)
-  misc_utils.print_log("\n\nsum_losses: "+str(PARAM.sum_losses)+"\n", train_log_file)
+  misc_utils.print_log("\n\n", train_log_file)
+  misc_utils.print_log("sum_losses: "+str(PARAM.sum_losses)+"\n", train_log_file)
   misc_utils.print_log("stop criterion losses: "+str(PARAM.stop_criterion_losses)+"\n", train_log_file)
   misc_utils.print_log("show losses: "+str(PARAM.show_losses)+"\n", train_log_file)
   evalOutputs_prev = eval_one_epoch(sess, val_model)
@@ -226,7 +243,9 @@ def main():
     # validation
     sess.run(val_inputs.initializer)
     evalOutputs = eval_one_epoch(sess, val_model)
-    val_loss_rel_impr = __relative_impr(evalOutputs_prev.avg_loss, evalOutputs.avg_loss, True)
+    val_loss_rel_impr = __relative_impr(evalOutputs_prev.stop_criterion_loss,
+                                        evalOutputs.stop_criterion_loss,
+                                        True)
     misc_utils.print_log("     Validation> sum_loss%.4f, stop_loss:%.4f, show_losses:%s, Time:%ds.           \n" % (
         evalOutputs.sum_loss,
         evalOutputs.stop_criterion_loss,

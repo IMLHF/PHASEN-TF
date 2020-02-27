@@ -19,6 +19,25 @@ def batch_time_compressedMag_mse(y1, y2, compress_idx):
   loss = tf.reduce_mean(tf.reduce_sum(loss, 0))
   return loss
 
+
+def batch_time_compressedStft_mse(y1, y2, compress_idx):
+  """
+  y1: complex, [batch, time, feature_dim]
+  y2: complex, [batch, time, feature_dim]
+  """
+  y1_abs_cpr = tf.pow(tf.abs(y1), compress_idx)
+  y2_abs_cpr = tf.pow(tf.abs(y2), compress_idx)
+  y1_angle = tf.angle(y1)
+  y2_angle = tf.angle(y2)
+  y1_cpr = tf.complex(y1_abs_cpr, 0.0) * tf.exp(tf.complex(0.0, y1_angle))
+  y2_cpr = tf.complex(y2_abs_cpr, 0.0) * tf.exp(tf.complex(0.0, y2_angle))
+  y1_con = tf.concat([tf.real(y1_cpr), tf.imag(y1_cpr)], -1)
+  y2_con = tf.concat([tf.real(y2_cpr), tf.imag(y2_cpr)], -1)
+  loss = tf.square(y1_con-y2_con)
+  loss = tf.reduce_mean(tf.reduce_sum(loss, 0))
+  return loss
+
+
 def batch_time_fea_real_mse(y1, y2):
   """
   y1: real, [batch, time, feature_dim]
@@ -83,14 +102,14 @@ def batch_CosSim_loss(est, ref): # -cos
   '''
   cos_sim = - tf.divide(vec_dot_mul(est, ref), # [batch, ...]
                         tf.multiply(vec_normal(est), vec_normal(ref)))
-  loss = tf.reduce_sum(cos_sim, 0) # [...,]
+  loss = tf.reduce_mean(cos_sim)
   return loss
 
 def batch_SquareCosSim_loss(est, ref): # -cos^2
   loss_s1 = - tf.divide(tf.square(vec_dot_mul(est, ref)),  # [batch, ...]
                         tf.multiply(vec_dot_mul(est, est),
                                     vec_dot_mul(ref, ref)))
-  loss = tf.reduce_sum(loss_s1, 0)
+  loss = tf.reduce_mean(loss_s1)
   return loss
 
 def batch_short_time_CosSim_loss(est, ref, st_frame_length, st_frame_step): # -cos
@@ -98,8 +117,7 @@ def batch_short_time_CosSim_loss(est, ref, st_frame_length, st_frame_step): # -c
                            frame_step=st_frame_step, pad_end=True)
   st_ref = tf.signal.frame(ref, frame_length=st_frame_length,
                            frame_step=st_frame_step, pad_end=True)
-  loss_s1 = batch_CosSim_loss(st_est, st_ref)  # [frame]
-  loss = tf.reduce_mean(loss_s1, 0)
+  loss = batch_CosSim_loss(st_est, st_ref)
   return loss
 
 def batch_short_time_SquareCosSim_loss(est, ref, st_frame_length, st_frame_step): # -cos^2
@@ -107,6 +125,5 @@ def batch_short_time_SquareCosSim_loss(est, ref, st_frame_length, st_frame_step)
                            frame_step=st_frame_step, pad_end=True)
   st_ref = tf.signal.frame(ref, frame_length=st_frame_length,
                            frame_step=st_frame_step, pad_end=True)
-  loss_s1 = batch_SquareCosSim_loss(st_est, st_ref)  # [frame]
-  loss = tf.reduce_mean(loss_s1, 0)
+  loss = batch_SquareCosSim_loss(st_est, st_ref)
   return loss

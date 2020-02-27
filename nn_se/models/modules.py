@@ -50,11 +50,6 @@ class Module(object):
                                                      PARAM.fft_length)
       self.clean_mag_batch = tf.abs(self.clean_stft_batch)
       self.clean_angle_batch = tf.angle(self.clean_stft_batch)
-      stft_r_t = tf.concat([tf.expand_dims(tf.real(self.clean_stft_batch),-1),
-                            tf.expand_dims(tf.imag(self.clean_stft_batch),-1)],
-                           -1)
-      # TODO:  be careful, clean_mag_batch may contain zeors !
-      self.clean_complexPhase_batch = stft_r_t / (tf.expand_dims(self.clean_mag_batch, -1)+1e-16)
 
     # create required variables
     self._init_variables()
