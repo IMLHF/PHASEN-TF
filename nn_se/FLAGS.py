@@ -105,7 +105,7 @@ class p40(BaseConfig):
   root_dir = '/home/zhangwenbo5/lihongfeng/PHASEN'
 
 
-class se_phasen_001(p40): # done p40
+class se_phasen_001(p40): # running p40
   '''
   phasen 001
   loss_compressedMag_mse + loss_compressedStft_mse
@@ -120,7 +120,7 @@ class se_phasen_001(p40): # done p40
   channel_P = 12
   n_TSB = 3
 
-class se_phasen_002(p40): # done p40
+class se_phasen_002(p40): # running p40
   '''
   phasen 002
   loss_mag_reMse|0050 + loss_CosSim
@@ -136,7 +136,7 @@ class se_phasen_002(p40): # done p40
   channel_P = 12
   n_TSB = 3
 
-class se_phasen_003(p40): # runnning p40
+class se_phasen_003(p40): # pendding p40
   '''
   phasen 003
   loss_mag_mse + loss_stft_mse
@@ -151,7 +151,7 @@ class se_phasen_003(p40): # runnning p40
   channel_P = 12
   n_TSB = 3
 
-class se_phasen_004(p40): # runnning p40
+class se_phasen_004(p40): # pendding p40
   '''
   phasen 004
   loss_compressedMag_mse + loss_compressedStft_mse
@@ -167,7 +167,7 @@ class se_phasen_004(p40): # runnning p40
   channel_P = 8
   n_TSB = 3
 
-class se_phasen_004_clipGrads(BaseConfig): # runnning 15123
+class se_phasen_004_clipGrads(BaseConfig): # pendding 15123
   '''
   phasen 004_clipGrads
   loss_compressedMag_mse + loss_compressedStft_mse
@@ -184,7 +184,7 @@ class se_phasen_004_clipGrads(BaseConfig): # runnning 15123
   n_TSB = 3
   clip_grads = True
 
-class se_phasen_005(p40): # runnning p40
+class se_phasen_005(p40): # pendding p40
   '''
   phasen 005
   loss_compressedMag_mse + loss_compressedStft_mse
@@ -202,6 +202,6 @@ class se_phasen_005(p40): # runnning p40
   learning_rate = 1e-3
 
 
-PARAM = se_phasen_004_clipGrads
+PARAM = se_phasen_002
 
 # CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=4 python -m xxx._2_train

@@ -34,6 +34,8 @@ def enhance_one_testset(testset_dir, enhanced_save_dir):
   testset_path = Path(testset_dir)
   noisy_path_list = list(map(str, testset_path.glob("*.wav")))
   func = partial(enhance_mini_process, enhanced_save_dir=enhanced_save_dir)
+  # for noisy_path in noisy_path_list:
+  #   func(noisy_path)
   job = Pool(test_processor).imap(func, noisy_path_list)
   list(tqdm(job, "Enhancing", len(noisy_path_list), unit="test wav", ncols=60))
 
