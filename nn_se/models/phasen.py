@@ -482,3 +482,7 @@ class PHASEN(object):
   @property
   def est_clean_wav_batch(self):
     return self._est_clean_wav_batch
+
+  @property
+  def mixed_wav_batch_in(self):
+    return self.mixed_wav_batch
