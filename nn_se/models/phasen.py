@@ -318,8 +318,8 @@ class PHASEN(object):
     all_grads = se_loss_grads
     all_params = self.se_net_vars
 
-    # all_clipped_grads, _ = tf.clip_by_global_norm(all_grads, PARAM.max_gradient_norm)
-    all_clipped_grads = all_grads
+    if PARAM.clip_grads:
+      all_grads, _ = tf.clip_by_global_norm(all_grads, PARAM.max_gradient_norm)
 
     # choose optimizer
     if PARAM.optimizer == "Adam":
@@ -327,12 +327,12 @@ class PHASEN(object):
     elif PARAM.optimizer == "RMSProp":
       self._optimizer = tf.compat.v1.train.RMSPropOptimizer(self._lr)
 
-    self._grads_bad_lst = if_grads_is_nan_or_inf(all_clipped_grads)
+    self._grads_bad_lst = if_grads_is_nan_or_inf(all_grads)
     self._grads_bad = tf.greater(tf.reduce_max(self._grads_bad_lst), 0)
     self._grads_coef = tf.cond(self._grads_bad,
                                lambda: tf.constant(0.0),
                                lambda: tf.constant(1.0))
-    checked_grads = [tf.math.multiply_no_nan(grad, self._grads_coef) for grad in all_clipped_grads]
+    checked_grads = [tf.math.multiply_no_nan(grad, self._grads_coef) for grad in all_grads]
     self._train_op = self._optimizer.apply_gradients(zip(checked_grads, all_params),
                                                      global_step=self.global_step)
 

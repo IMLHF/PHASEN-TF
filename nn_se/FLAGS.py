@@ -3,11 +3,6 @@ class StaticKey(object):
   MODEL_VALIDATE_KEY = 'val'
   MODEL_INFER_KEY = 'infer'
 
-  # dataset name
-  train_name="train"
-  validation_name="validation"
-  test_name="test"
-
   def config_name(self): # config_name
     return self.__class__.__name__
 
@@ -100,6 +95,8 @@ class BaseConfig(StaticKey):
   frequency_dim = 257
   loss_compressedMag_idx = 0.3
 
+  clip_grads = False
+
 
 class p40(BaseConfig):
   n_processor_gen_tfrecords = 56
@@ -108,9 +105,10 @@ class p40(BaseConfig):
   root_dir = '/home/zhangwenbo5/lihongfeng/PHASEN'
 
 
-class se_phasen_001(p40): # runnning p40
+class se_phasen_001(p40): # done p40
   '''
   phasen 001
+  loss_compressedMag_mse + loss_compressedStft_mse
   '''
   sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   sum_losses_w = []
@@ -122,7 +120,7 @@ class se_phasen_001(p40): # runnning p40
   channel_P = 12
   n_TSB = 3
 
-class se_phasen_002(p40): # runnning p40
+class se_phasen_002(p40): # done p40
   '''
   phasen 002
   loss_mag_reMse|0050 + loss_CosSim
@@ -138,7 +136,72 @@ class se_phasen_002(p40): # runnning p40
   channel_P = 12
   n_TSB = 3
 
+class se_phasen_003(p40): # runnning p40
+  '''
+  phasen 003
+  loss_mag_mse + loss_stft_mse
+  '''
+  sum_losses = ["loss_mag_mse", "loss_stft_mse"]
+  sum_losses_w = []
+  show_losses = ["loss_mag_mse", "loss_stft_mse", "loss_compressedStft_mse"]
+  show_losses_w = []
+  stop_criterion_losses = ["loss_mag_mse", "loss_stft_mse"]
+  stop_criterion_losses_w = []
+  channel_A = 24
+  channel_P = 12
+  n_TSB = 3
 
-PARAM = se_phasen_002
+class se_phasen_004(p40): # runnning p40
+  '''
+  phasen 004
+  loss_compressedMag_mse + loss_compressedStft_mse
+  Ca = 12, Cp = 8
+  '''
+  sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  sum_losses_w = []
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse", "loss_stft_mse"]
+  show_losses_w = []
+  stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  stop_criterion_losses_w = []
+  channel_A = 12
+  channel_P = 8
+  n_TSB = 3
+
+class se_phasen_004_clipGrads(BaseConfig): # runnning 15123
+  '''
+  phasen 004_clipGrads
+  loss_compressedMag_mse + loss_compressedStft_mse
+  Ca = 12, Cp = 8
+  '''
+  sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  sum_losses_w = []
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse", "loss_stft_mse"]
+  show_losses_w = []
+  stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  stop_criterion_losses_w = []
+  channel_A = 12
+  channel_P = 8
+  n_TSB = 3
+  clip_grads = True
+
+class se_phasen_005(p40): # runnning p40
+  '''
+  phasen 005
+  loss_compressedMag_mse + loss_compressedStft_mse
+  Ca = 12, Cp = 8
+  '''
+  sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  sum_losses_w = []
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse", "loss_stft_mse"]
+  show_losses_w = []
+  stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  stop_criterion_losses_w = []
+  channel_A = 12
+  channel_P = 8
+  n_TSB = 3
+  learning_rate = 1e-3
+
+
+PARAM = se_phasen_004_clipGrads
 
 # CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=4 python -m xxx._2_train
