@@ -1,6 +1,6 @@
 class StaticKey(object):
   MODEL_TRAIN_KEY = 'train'
-  MODEL_VALIDATE_KEY = 'val'
+  MODEL_VALIDATE_KEY = 'validation'
   MODEL_INFER_KEY = 'infer'
 
   def config_name(self): # config_name
@@ -202,6 +202,6 @@ class se_phasen_005(p40): # pendding p40
   learning_rate = 1e-3
 
 
-PARAM = se_phasen_002
+PARAM = se_phasen_002 ###
 
 # CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=4 python -m xxx._2_train

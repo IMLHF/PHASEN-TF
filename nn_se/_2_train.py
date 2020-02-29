@@ -41,7 +41,8 @@ def train_one_epoch(sess, train_model, train_log_file):
   while True:
     try:
       (lr, sum_loss, show_losses, stop_c_loss, _,
-       grads_bad, grads_bad_lst
+       grads_bad, grads_bad_lst,
+       #  bn_w,
        ) = sess.run(
           [
               train_model.lr,
@@ -51,7 +52,10 @@ def train_one_epoch(sess, train_model, train_log_file):
               train_model.train_op,
               train_model._grads_bad,
               train_model._grads_bad_lst,
+              # train_model.net_model.layers_TSB[0].sA2_conv2d_bna.get_bn_weight()
            ])
+
+      # print("bn2", bn_w, flush=True)
       if grads_bad:
         global grads_nan_time
         grads_nan_time += 1
@@ -183,7 +187,7 @@ def main():
                                                                       clean_valset_wav)
 
     ModelC, VarC = model_builder.get_model_class_and_var()
-    variablesObj = VarC()
+    variablesObj = VarC(name="PHASEN")
 
     train_model = ModelC(PARAM.MODEL_TRAIN_KEY, variablesObj, train_inputs.mixed, train_inputs.clean)
     # tf.compat.v1.get_variable_scope().reuse_variables()

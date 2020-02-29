@@ -6,19 +6,21 @@ from ..utils import losses
 from ..utils import misc_utils
 
 
-class Stream_PreNet:
+class Stream_PreNet(tf.keras.Model):
   def __init__(self, channel_out, kernels=[[1,7], [7,1]], name='streamA_or_P_prenet'):
     '''
     channel_out: output channel
     kernels: kernel for layers
     '''
+    super(Stream_PreNet, self).__init__()
+    self._name = name
     self.conv2d_lst = []
     for i, kernel in enumerate(kernels):
       conv_name = name+("_%d" % i)
       conv2d = tf.keras.layers.Conv2D(filters=channel_out, kernel_size=kernel, padding="same",name=conv_name)
       self.conv2d_lst.append(conv2d)
 
-  def __call__(self, feature_in):
+  def call(self, feature_in):
     '''
     feature_in : [batch, T, F, channel_in]
     return : [batch, T, F, channel_out]
@@ -31,34 +33,55 @@ class Stream_PreNet:
     return out
 
 
-class BatchNormAndActivate:
+class BatchNormAndActivate(tf.keras.Model):
   def __init__(self, bn_axis=-1, activation=tf.keras.activations.relu, name='BN_activate'):
-    self.bn_layer = tf.keras.layers.BatchNormalization(bn_axis, name=name)
+    super(BatchNormAndActivate, self).__init__()
+    self._name = name
+    self.bn_layer = tf.keras.layers.BatchNormalization(bn_axis, name="bn")
     self.activate_fn = activation
 
-  def __call__(self, fea_in, training):
+  def call(self, fea_in, training):
+    # tmp = self.activate_fn(self.bn_layer(fea_in, training=training))
+    # print(training)
+    # # if training:
+    # for update_op in self.bn_layer.updates:
+    #   tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_op)
     return self.activate_fn(self.bn_layer(fea_in, training=training))
 
+  def get_bn_weight(self):
+    moving_mean, moving_variance = None, None
+    for var in self.bn_layer.variables:
+        name = var.name.lower()
+        if "variance" in name:
+            moving_variance = var
+        if "mean" in name:
+            moving_mean = var
+    if moving_mean is not None and moving_variance is not None:
+        return [moving_mean, moving_variance]
+    raise ValueError("Unable to find moving mean and variance")
 
-class FrequencyTransformationBlock:
+
+class FrequencyTransformationBlock(tf.keras.Model):
   def __init__(self, frequency_dim, channel_in_out, channel_attention=5, name="FTB"):
+    super(FrequencyTransformationBlock, self).__init__()
+    self._name = name
     self.att_conv2d_1 = tf.keras.layers.Conv2D(channel_attention, [1,1], padding="same",
-                                               name=name+"/att_conv2d_1")  # [batch, T, F * channel_attention]
-    self.att_conv2d_1_bna = BatchNormAndActivate(name=name+"/att_conv2d_1_bna")
+                                               name="att_conv2d_1")  # [batch, T, F * channel_attention]
+    self.att_conv2d_1_bna = BatchNormAndActivate(name="att_conv2d_1_bna")
 
     self.att_inner_reshape = tf.keras.layers.Reshape([-1, frequency_dim * channel_attention])
     self.att_conv1d_2 = tf.keras.layers.Conv1D(frequency_dim, 9, padding="same",
-                                               name=name+"/att_conv1d_2")  # [batch, T, F]
-    self.att_conv1d_2_bna = BatchNormAndActivate(name=name+"/att_conv1d_2_bna")
+                                               name="att_conv1d_2")  # [batch, T, F]
+    self.att_conv1d_2_bna = BatchNormAndActivate(name="att_conv1d_2_bna")
     self.att_out_reshape = tf.keras.layers.Reshape([-1, frequency_dim, 1])
-    self.frequencyFC = tf.keras.layers.Dense(frequency_dim, name=name+"/FFC")
+    self.frequencyFC = tf.keras.layers.Dense(frequency_dim, name="FFC")
     self.concat_FFCout_and_In = tf.keras.layers.Concatenate(-1)
 
     self.out_conv2d = tf.keras.layers.Conv2D(channel_in_out, [1,1], padding="same",
-                                             name=name+"/out_conv2d")
-    self.out_conv2d_bna = BatchNormAndActivate(name=name+"/out_conv2d_bna")
+                                             name="out_conv2d")
+    self.out_conv2d_bna = BatchNormAndActivate(name="out_conv2d_bna")
 
-  def __call__(self, feature_in, training):
+  def call(self, feature_in, training):
     '''
     feature_n: [batch, T, F, channel_in_out]
     '''
@@ -81,12 +104,14 @@ class FrequencyTransformationBlock:
     return out
 
 
-class InfoCommunicate:
+class InfoCommunicate(tf.keras.Model):
   def __init__(self, channel_out, activate_fn=tf.keras.activations.tanh, name='InfoC'):
-    self.conv2d = tf.keras.layers.Conv2D(channel_out, [1, 1], padding="same", name=name+"/conv2d")
+    super(InfoCommunicate, self).__init__()
+    self._name = name
+    self.conv2d = tf.keras.layers.Conv2D(channel_out, [1, 1], padding="same", name="conv2d")
     self.activate_fn = activate_fn
 
-  def __call__(self, feature_x1, feature_x2):
+  def call(self, feature_x1, feature_x2):
     # feature_x1: [batch, T, F, channel_out]
     # feature_x2: [batch, T, F, Cp or Ca]
     # return: [batch, T, F, channel_out]
@@ -97,25 +122,27 @@ class InfoCommunicate:
     return out_multiply
 
 
-class TwoStreamBlock:
+class TwoStreamBlock(tf.keras.Model):
   def __init__(self, frequency_dim, channel_in_out_A, channel_in_out_P, name="TSB"):
-    self.sA1_pre_FTB = FrequencyTransformationBlock(frequency_dim, channel_in_out_A, name=name+"/sA1_pre_FTB")
-    self.sA2_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [5, 5], padding="same", name=name+"/sA2_conv2d")
-    self.sA2_conv2d_bna = BatchNormAndActivate(name=name+"/sA2_conv2d_bna")
-    self.sA3_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [25, 1], padding="same", name=name+"/sA3_conv2d")
-    self.sA3_conv2d_bna = BatchNormAndActivate(name=name+"/sA3_conv2d_bna")
-    self.sA4_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [5, 5], padding="same", name=name+"/sA4_conv2d")
-    self.sA4_conv2d_bna = BatchNormAndActivate(name=name+"/sA4_conv2d_bna")
-    self.sA5_post_FTB = FrequencyTransformationBlock(frequency_dim, channel_in_out_A, name=name+"/sA5_post_FTB")
-    self.sA6_info_communicate = InfoCommunicate(channel_in_out_A, name=name+"/InfoC_A")
+    super(TwoStreamBlock, self).__init__()
+    self._name = name
+    self.sA1_pre_FTB = FrequencyTransformationBlock(frequency_dim, channel_in_out_A, name="sA1_pre_FTB")
+    self.sA2_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [5, 5], padding="same", name="sA2_conv2d")
+    self.sA2_conv2d_bna = BatchNormAndActivate(name="sA2_conv2d_bna")
+    self.sA3_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [25, 1], padding="same", name="sA3_conv2d")
+    self.sA3_conv2d_bna = BatchNormAndActivate(name="sA3_conv2d_bna")
+    self.sA4_conv2d = tf.keras.layers.Conv2D(channel_in_out_A, [5, 5], padding="same", name="sA4_conv2d")
+    self.sA4_conv2d_bna = BatchNormAndActivate(name="sA4_conv2d_bna")
+    self.sA5_post_FTB = FrequencyTransformationBlock(frequency_dim, channel_in_out_A, name="sA5_post_FTB")
+    self.sA6_info_communicate = InfoCommunicate(channel_in_out_A, name="InfoC_A")
 
-    self.sP1_conv2d_before_LN = tf.keras.layers.LayerNormalization(-1, name=name+"/sP1_conv2d_before_LN")
-    self.sP1_conv2d = tf.keras.layers.Conv2D(channel_in_out_P, [5, 3], padding="same", name=name+"/sP1_conv2d")
-    self.sP2_conv2d_before_LN = tf.keras.layers.LayerNormalization(-1, name=name+"/sP2_conv2d_before_LN")
-    self.sP2_conv2d = tf.keras.layers.Conv2D(channel_in_out_P, [25, 1], padding="same", name=name+"/sP2_conv2d")
-    self.sP3_info_communicate = InfoCommunicate(channel_in_out_P, name=name+"/InfoC_P")
+    self.sP1_conv2d_before_LN = tf.keras.layers.LayerNormalization(-1, name="sP1_conv2d_before_LN")
+    self.sP1_conv2d = tf.keras.layers.Conv2D(channel_in_out_P, [5, 3], padding="same", name="sP1_conv2d")
+    self.sP2_conv2d_before_LN = tf.keras.layers.LayerNormalization(-1, name="sP2_conv2d_before_LN")
+    self.sP2_conv2d = tf.keras.layers.Conv2D(channel_in_out_P, [25, 1], padding="same", name="sP2_conv2d")
+    self.sP3_info_communicate = InfoCommunicate(channel_in_out_P, name="InfoC_P")
 
-  def __call__(self, feature_sA, feature_sP, training):
+  def call(self, feature_sA, feature_sP, training):
     # Stream A
     sA_out = feature_sA
     sA_out = self.sA1_pre_FTB(sA_out, training=training)
@@ -141,55 +168,51 @@ class TwoStreamBlock:
     return sA_fin_out, sP_fin_out
 
 
-class StreamAmplitude_PostNet:
+class StreamAmplitude_PostNet(tf.keras.Model):
   def __init__(self, frequency_dim, name="sA_PostNet"):
-    self.layer_sequences = []
-
-    self.layer_sequences.append(
-        tf.keras.layers.Conv2D(8, [1, 1], padding="same", name=name+"/p1_conv2d"))
-    self.layer_sequences.append(tf.keras.layers.Reshape([-1, frequency_dim * 8]))
+    super(StreamAmplitude_PostNet, self).__init__()
+    self._name = name
+    self.p1_conv2d = tf.keras.layers.Conv2D(8, [1, 1], padding="same", name="p1_conv2d")
+    self.p1_reshape = tf.keras.layers.Reshape([-1, frequency_dim * 8])
 
     fw_lstm = tf.keras.layers.LSTM(512, dropout=0.2, implementation=2,
                                    return_sequences=True, name='fwlstm')
     bw_lstm = tf.keras.layers.LSTM(512, dropout=0.2, implementation=2,
                                    return_sequences=True, name='bwlstm', go_backwards=True)
-    self.layer_sequences.append(
-        [tf.keras.layers.Bidirectional(layer=fw_lstm, backward_layer=bw_lstm,
-                                       merge_mode='concat', name=name+'/p2_blstm')])
+    self.p2_blstm = tf.keras.layers.Bidirectional(layer=fw_lstm, backward_layer=bw_lstm,
+                                                  merge_mode='concat', name=name+'/p2_blstm')
 
-    self.layer_sequences.append(
-        tf.keras.layers.Dense(600, activation=tf.keras.activations.relu, name=name+"/p3_dense"))
-    self.layer_sequences.append(
-        tf.keras.layers.Dense(600, activation=tf.keras.activations.relu, name=name+"/p4_dense"))
-    self.layer_sequences.append(
-        tf.keras.layers.Dense(frequency_dim, activation=tf.keras.activations.sigmoid,
-                              name=name+"/out_dense"))
+    self.p3_dense = tf.keras.layers.Dense(600, activation=tf.keras.activations.relu, name="p3_dense")
+    self.p4_dense = tf.keras.layers.Dense(600, activation=tf.keras.activations.relu, name="p4_dense")
+    self.out_dense = tf.keras.layers.Dense(frequency_dim, activation=tf.keras.activations.sigmoid,
+                                           name="out_dense")
 
-  def __call__(self, feature_sA, training):
+  def call(self, feature_sA, training):
     '''
     return [batch, T, F]
     '''
     out = feature_sA
-    for layer_fn in self.layer_sequences:
-      if type(layer_fn) is list:
-        out = layer_fn[0](out, training=training)
-      else:
-        out = layer_fn(out)
+    out = self.p1_conv2d(out)
+    out = self.p1_reshape(out)
+    out = self.p2_blstm(out, training=training)
+    out = self.p3_dense(out)
+    out = self.p4_dense(out)
+    out = self.out_dense(out)
     return out
 
 
-class StreamPhase_PostNet:
+class StreamPhase_PostNet(tf.keras.Model):
   def __init__(self, name="sP_PostNet"):
-    self.layer_sequences = []
-    self.layer_sequences.append(
-      tf.layers.Conv2D(2, [1,1], padding="same", name=name+"/conv2d"))
+    super(StreamPhase_PostNet, self).__init__()
+    self._name = name
+    self._layers.append(tf.keras.layers.Conv2D(2, [1,1], padding="same", name="conv2d"))
 
-  def __call__(self, feature_sP):
+  def call(self, feature_sP):
     '''
     return [batch, T, F]->complex
     '''
     out = feature_sP
-    for layer_fn in self.layer_sequences:
+    for layer_fn in self._layers:
       out = layer_fn(out)
     # out: [batch, T, F, 2]
     out_complex = tf.complex(out[..., 0], out[..., 1])
@@ -200,8 +223,38 @@ class StreamPhase_PostNet:
 
 class NET_PHASEN_OUT(
     collections.namedtuple("NET_PHASEN_OUT",
-                           ("mag", "normalized_complex_phase"))):
+                           ("mag_mask", "normalized_complex_phase"))):
   pass
+
+
+class NetPHASEN(tf.keras.Model):
+  def __init__(self, name="PHASEN"):
+    super(NetPHASEN, self).__init__()
+    self._name = name
+    self.streamA_prenet = Stream_PreNet(PARAM.channel_A, PARAM.prenet_A_kernels, name="streamA_prenet")
+    self.streamP_prenet = Stream_PreNet(PARAM.channel_P, PARAM.prenet_P_kernels, name="streanP_prenet")
+    self.layers_TSB = []
+    for i in range(1, PARAM.n_TSB+1):
+      tsb_t = TwoStreamBlock(PARAM.frequency_dim, PARAM.channel_A, PARAM.channel_P, name="TSB_%d" % i)
+      self.layers_TSB.append(tsb_t)
+    self.streamA_postnet = StreamAmplitude_PostNet(PARAM.frequency_dim, name="sA_postnet")
+    self.streamP_postnet = StreamPhase_PostNet(name="sP_postnet")
+
+  def call(self, feature_in, training):
+    '''
+    return mag_batch[batch, time, fre]->real, normalized_complex_phase[batch, time, fre]->complex
+    '''
+    sA_out = self.streamA_prenet(feature_in) # [batch, t, f, Ca]
+    sP_out = self.streamP_prenet(feature_in) # [batch, t, f, Cp]
+    for tsb in self.layers_TSB:
+      sA_out, sP_out = tsb(sA_out, sP_out, training=training)
+    sA_out = self.streamA_postnet(sA_out, training=training) # [batch, t, f]
+    sP_out = self.streamP_postnet(sP_out) # [batch, t, f, 2]
+
+    est_mask = sA_out # [batch, t, f]
+    normed_complex_phase = sP_out # [batch, t, f], complex value
+    return NET_PHASEN_OUT(mag_mask=est_mask,
+                          normalized_complex_phase=normed_complex_phase)
 
 class FrowardOutputs(
     collections.namedtuple("FrowardOutputs",
@@ -224,27 +277,33 @@ def if_grads_is_nan_or_inf(grads):
   # True if grads_is_nan_or_inf > 0 else False
   return grads_is_nan_or_inf
 
-class PHASEN_Variables(object):
-  def __init__(self, name='PHASEN'):
-    self.streamA_prenet = Stream_PreNet(PARAM.channel_A, PARAM.prenet_A_kernels, name=name+"/streamA_prenet")
-    self.streamP_prenet = Stream_PreNet(PARAM.channel_P, PARAM.prenet_P_kernels, name=name+"/streanP_prenet")
-    self.layers_TSB = []
-    for i in range(1, PARAM.n_TSB+1):
-      tsb_t = TwoStreamBlock(PARAM.frequency_dim, PARAM.channel_A, PARAM.channel_P, name=name+("/TSB_%d" % i))
-      self.layers_TSB.append(tsb_t)
-    self.streamA_postnet = StreamAmplitude_PostNet(PARAM.frequency_dim, name=name+"/sA_postnet")
-    self.streamP_postnet = StreamPhase_PostNet(name=name+"/sP_postnet")
 
 class PHASEN(object):
   def __init__(self,
                mode,
-               variables:PHASEN_Variables,
+               net_model:NetPHASEN,
                mixed_wav_batch,
                clean_wav_batch=None,
                noise_wav_batch=None):
     del noise_wav_batch
     self.mode = mode
-    self.variables = variables
+    self.net_model = net_model
+    self.net_model.build(input_shape=(None, None, PARAM.frequency_dim, 2))
+    # print(net_model.summary())
+    # misc_utils.show_variables(net_model.trainable_variables)
+
+    # global_step, lr, notrainable variables
+    with tf.compat.v1.variable_scope("notrain_vars", reuse=tf.compat.v1.AUTO_REUSE):
+      self._global_step = tf.compat.v1.get_variable("global_step", dtype=tf.int32,
+                                                    initializer=tf.constant(1), trainable=False)
+      self._lr = tf.compat.v1.get_variable("lr", dtype=tf.float32, trainable=False,
+                                           initializer=tf.constant(PARAM.learning_rate))
+
+    self.save_variables = [self.lr, self._global_step]
+    self.save_variables.extend(net_model.trainable_variables)
+    self.saver = tf.compat.v1.train.Saver(self.save_variables,
+                                          max_to_keep=PARAM.max_keep_ckpt,
+                                          save_relative_paths=True)
 
     self.mixed_wav_batch = mixed_wav_batch
     self.mixed_stft_batch = misc_utils.tf_wav2stft(self.mixed_wav_batch,
@@ -265,21 +324,10 @@ class PHASEN(object):
       self.clean_angle_batch = tf.angle(self.clean_stft_batch)
 
     # nn forward
-    self._forward_outputs = self._forward()
+    training = (self.mode == PARAM.MODEL_TRAIN_KEY)
+    print('%s model phase is_training:' % self.mode, training, flush=True)
+    self._forward_outputs = self._forward(training=training)
     self._est_clean_wav_batch = self._forward_outputs.est_clean_wav_batch
-
-    # global_step, lr, notrainable variables
-    with tf.compat.v1.variable_scope("notrain_vars", reuse=tf.compat.v1.AUTO_REUSE):
-      self._global_step = tf.compat.v1.get_variable("global_step", dtype=tf.int32,
-                                                    initializer=tf.constant(1), trainable=False)
-      self._lr = tf.compat.v1.get_variable("lr", dtype=tf.float32, trainable=False,
-                                           initializer=tf.constant(PARAM.learning_rate))
-
-    self.save_variables = [self.lr, self._global_step]
-    self.save_variables.extend(tf.compat.v1.trainable_variables())
-    self.saver = tf.compat.v1.train.Saver(self.save_variables,
-                                          max_to_keep=PARAM.max_keep_ckpt,
-                                          save_relative_paths=True)
 
     # for lr halving
     self._new_lr = tf.compat.v1.placeholder(tf.float32, name='new_lr')
@@ -294,15 +342,12 @@ class PHASEN(object):
       # losses
       self._losses = self._get_losses()
 
-    self.variables = variables
-
     # get specific variables
-    self.se_net_scope = None
-    self.se_net_vars = tf.compat.v1.trainable_variables(scope=self.se_net_scope)
+    self.se_net_vars = self.net_model.trainable_variables
 
     # show specific variables
     if mode == PARAM.MODEL_TRAIN_KEY:
-      print("\nSE PARAMs")
+      print("\nse_net PARAMs")
       misc_utils.show_variables(self.se_net_vars)
 
     if mode == PARAM.MODEL_VALIDATE_KEY or mode == PARAM.MODEL_INFER_KEY:
@@ -335,37 +380,26 @@ class PHASEN(object):
                                lambda: tf.constant(0.0),
                                lambda: tf.constant(1.0))
     checked_grads = [tf.math.multiply_no_nan(grad, self._grads_coef) for grad in all_grads]
-    self._train_op = self._optimizer.apply_gradients(zip(checked_grads, all_params),
-                                                     global_step=self.global_step)
+    update_ops = self.net_model.updates
+    # for ops in update_ops:
+    #   print(ops, flush=True)
+    print("%s model update_ops:" % self.mode, len(update_ops), flush=True)
+    with tf.control_dependencies(update_ops):
+      self._train_op = self._optimizer.apply_gradients(zip(checked_grads, all_params),
+                                                       global_step=self.global_step)
 
-  def _net_PHASEN(self, feature_in, training):
-    '''
-    return mag_batch[batch, time, fre]->real, normalized_complex_phase[batch, time, fre]->complex
-    '''
-    sA_out = self.variables.streamA_prenet(feature_in) # [batch, t, f, Ca]
-    sP_out = self.variables.streamP_prenet(feature_in) # [batch, t, f, Cp]
-    for tsb in self.variables.layers_TSB:
-      sA_out, sP_out = tsb(sA_out, sP_out, training=training)
-    sA_out = self.variables.streamA_postnet(sA_out, training=training) # [batch, t, f]
-    sP_out = self.variables.streamP_postnet(sP_out) # [batch, t, f, 2]
 
-    est_mag = tf.multiply(self.mixed_mag_batch, sA_out) # [batch, t, f]
-    normed_complex_phase = sP_out # [batch, t, f, 2]
-    return NET_PHASEN_OUT(mag=est_mag,
-                          normalized_complex_phase=normed_complex_phase)
-
-  def _forward(self):
+  def _forward(self, training):
     mixed_stft_batch_real = tf.real(self.mixed_stft_batch)
     mixed_stft_batch_imag = tf.imag(self.mixed_stft_batch)
     mixed_stft_batch_real = tf.expand_dims(mixed_stft_batch_real, -1)
     mixed_stft_batch_imag = tf.expand_dims(mixed_stft_batch_imag, -1)
     feature_in = tf.concat([mixed_stft_batch_real, mixed_stft_batch_imag], axis=-1)
 
-    training = (self.mode == PARAM.MODEL_TRAIN_KEY)
-    net_phasen_out = self._net_PHASEN(feature_in, training=training)
+    net_phasen_out = self.net_model(feature_in, training=training)
 
-    est_clean_mag_batch = net_phasen_out.mag
-    est_complexPhase_batch = net_phasen_out.normalized_complex_phase
+    est_clean_mag_batch = tf.multiply(self.mixed_mag_batch, net_phasen_out.mag_mask) # [batch, t, f]
+    est_complexPhase_batch = net_phasen_out.normalized_complex_phase # [batch, t, f], complex value
     est_clean_stft_batch = tf.multiply(tf.complex(est_clean_mag_batch, 0.0), est_complexPhase_batch)
     est_clean_wav_batch = misc_utils.tf_stft2wav(est_clean_stft_batch, PARAM.frame_length,
                                                  PARAM.frame_step, PARAM.fft_length)
