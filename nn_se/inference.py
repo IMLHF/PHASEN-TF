@@ -52,6 +52,13 @@ def build_SMG(ckpt_name=None, batch_size=None, finalizeG=True):
 
 def enhance_one_wav(smg: SMG, wav):
   wav_batch = np.array([wav], dtype=np.float32)
-  enhanced_wav_batch = smg.session.run(smg.model.est_clean_wav_batch, feed_dict={smg.model.mixed_wav_batch_in: wav_batch})
+  (enhanced_wav_batch,
+   #  bn_w
+   ) = smg.session.run([
+       smg.model.est_clean_wav_batch,
+       #  smg.model.net_model.layers_TSB[0].sA2_conv2d_bna.get_bn_weight()
+   ],
+      feed_dict={smg.model.mixed_wav_batch_in: wav_batch})
+  # print(bn_w)
   enhanced_wav = enhanced_wav_batch[0]
   return enhanced_wav

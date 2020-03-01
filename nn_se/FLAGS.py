@@ -36,7 +36,7 @@ class BaseConfig(StaticKey):
 
   train_val_wav_seconds = 3.0
 
-  batch_size = 12
+  batch_size = 8
   n_processor_tfdata = 4
 
   model_name = "PHASEN"
@@ -59,7 +59,7 @@ class BaseConfig(StaticKey):
 
   s_epoch = 1
   max_epoch = 40
-  batches_to_logging = 300
+  batches_to_logging = 200000
 
   max_model_abandon_time = 3
   no_abandon = True
@@ -87,8 +87,8 @@ class BaseConfig(StaticKey):
 
   # just for "DISCRIMINATOR_AD_MODEL"
 
-  channel_A = 32
-  channel_P = 16
+  channel_A = 96
+  channel_P = 48
   prenet_A_kernels = [[1,7], [7, 1]]
   prenet_P_kernels = [[5,3], [25,1]]
   n_TSB = 3
@@ -112,12 +112,12 @@ class se_phasen_001(p40): # running p40
   '''
   sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   sum_losses_w = []
-  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse", "loss_CosSim"]
   show_losses_w = []
   stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   stop_criterion_losses_w = []
-  channel_A = 24
-  channel_P = 12
+  channel_A = 96
+  channel_P = 48
   n_TSB = 3
 
 class se_phasen_002(p40): # running p40
@@ -132,8 +132,8 @@ class se_phasen_002(p40): # running p40
   stop_criterion_losses = ["loss_mag_reMse", "loss_CosSim"]
   stop_criterion_losses_w = []
   relative_loss_epsilon = 0.05
-  channel_A = 24
-  channel_P = 12
+  channel_A = 96
+  channel_P = 48
   n_TSB = 3
 
 class se_phasen_003(p40): # pendding p40

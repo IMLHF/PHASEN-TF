@@ -45,7 +45,7 @@ def train_one_epoch(sess, train_model, train_log_file):
        #  bn_w,
        ) = sess.run(
           [
-              train_model.lr,
+              train_model.optimizer_lr,
               train_model.losses.sum_loss,
               train_model.losses.show_losses,
               train_model.losses.stop_criterion_loss,
@@ -75,10 +75,11 @@ def train_one_epoch(sess, train_model, train_log_file):
         avg_stop_c_loss += stop_c_loss
       i += 1
       print("\r", end="")
-      print("train: %d/%d, cost %.2fs, sum_loss %.4f, stop_loss %.4f, show_losses %s           " % (
+      print(
+          "train: %d/%d, cost %.2fs, sum_loss %.4f, stop_loss %.4f, show_losses %s, lr %.2e          " % (
             i, total_i, time.time()-one_batch_time, sum_loss, stop_c_loss,
-            str(np.round(show_losses, 4))),
-            flush=True, end="")
+            str(np.round(show_losses, 4)), lr),
+          flush=True, end="")
       one_batch_time = time.time()
       if i % PARAM.batches_to_logging == 0:
         print("\r", end="")
@@ -87,9 +88,11 @@ def train_one_epoch(sess, train_model, train_log_file):
               )
         minbatch_time = time.time()
         misc_utils.print_log(msg, train_log_file)
+      # if i > 50 : break
     except tf.errors.OutOfRangeError:
       break
   print("\r", end="")
+  # print("bn2", bn_w, flush=True)
   e_time = time.time()
   avg_sum_loss = avg_sum_loss / total_i
   avg_show_losses = avg_show_losses / total_i
@@ -184,7 +187,8 @@ def main():
       train_inputs = dataloader.get_batch_inputs_from_nosiyCleanDataset(noisy_trainset_wav,
                                                                         clean_trainset_wav)
       val_inputs = dataloader.get_batch_inputs_from_nosiyCleanDataset(noisy_valset_wav,
-                                                                      clean_valset_wav)
+                                                                      clean_valset_wav,
+                                                                      shuffle_records=False)
 
     ModelC, VarC = model_builder.get_model_class_and_var()
     variablesObj = VarC(name="PHASEN")
