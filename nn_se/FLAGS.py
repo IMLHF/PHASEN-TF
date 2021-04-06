@@ -76,7 +76,6 @@ class BaseConfig(StaticKey):
   @param not_transformed_losses/transformed_losses[add FT before loss_name]:
   loss_mag_mse, loss_spec_mse, loss_wav_L1, loss_wav_L2,
   loss_mag_reMse, loss_reSpecMse, loss_reWavL2,
-  loss_sdrV1, loss_sdrV2, loss_stSDRV3, loss_cosSimV1, loss_cosSimV2,
   """
   sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   sum_losses_w = []
@@ -105,7 +104,7 @@ class p40(BaseConfig):
   root_dir = '/home/zhangwenbo5/lihongfeng/PHASEN'
 
 
-class se_phasen_001(p40): # running p40
+class se_phasen_001(p40): # done p40
   '''
   phasen 001
   loss_compressedMag_mse + loss_compressedStft_mse
@@ -120,7 +119,7 @@ class se_phasen_001(p40): # running p40
   channel_P = 48
   n_TSB = 3
 
-class se_phasen_002(p40): # running p40
+class se_phasen_002(p40): # done p40
   '''
   phasen 002
   loss_mag_reMse|0050 + loss_CosSim
@@ -143,28 +142,28 @@ class se_phasen_003(p40): # pendding p40
   '''
   sum_losses = ["loss_mag_mse", "loss_stft_mse"]
   sum_losses_w = []
-  show_losses = ["loss_mag_mse", "loss_stft_mse", "loss_compressedStft_mse"]
+  show_losses = ["loss_mag_mse", "loss_stft_mse", "loss_CosSim"]
   show_losses_w = []
   stop_criterion_losses = ["loss_mag_mse", "loss_stft_mse"]
   stop_criterion_losses_w = []
-  channel_A = 24
-  channel_P = 12
+  channel_A = 96
+  channel_P = 48
   n_TSB = 3
 
-class se_phasen_004(p40): # pendding p40
+class se_phasen_004_selfConv2d(p40): # running p40
   '''
   phasen 004
   loss_compressedMag_mse + loss_compressedStft_mse
-  Ca = 12, Cp = 8
+  Ca = 24, Cp = 12
   '''
   sum_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   sum_losses_w = []
-  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse", "loss_stft_mse"]
+  show_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse", "loss_CosSim"]
   show_losses_w = []
   stop_criterion_losses = ["loss_compressedMag_mse", "loss_compressedStft_mse"]
   stop_criterion_losses_w = []
-  channel_A = 12
-  channel_P = 8
+  channel_A = 24
+  channel_P = 12
   n_TSB = 3
 
 class se_phasen_004_clipGrads(BaseConfig): # pendding 15123
@@ -202,6 +201,6 @@ class se_phasen_005(p40): # pendding p40
   learning_rate = 1e-3
 
 
-PARAM = se_phasen_002 ###
+PARAM = se_phasen_004_selfConv2d ###
 
 # CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=4 python -m xxx._2_train

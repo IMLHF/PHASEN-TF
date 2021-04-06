@@ -21,7 +21,8 @@ def tf_wav2stft(batch_wav, frame_length, frame_step, n_fft):
 
 def tf_stft2wav(batch_stft, frame_length, frame_step, n_fft):
   signals = tf.signal.inverse_stft(batch_stft, frame_length, frame_step, fft_length=n_fft,
-                                   window_fn=tf.signal.inverse_stft_window_fn(frame_step))
+                                   window_fn=tf.signal.inverse_stft_window_fn(frame_step)
+                                   )
   return signals
 
 

@@ -3,4 +3,6 @@ exp
 *.npy
 __pycache__
 ~*
-FLAGS.py-
+-FLAGS.py
+*.txt
+tmp.py

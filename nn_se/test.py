@@ -18,14 +18,15 @@ def wav_through_stft_istft():
   wav_batch = np.array([wav], dtype=np.float32)
   spec = misc_utils.tf_wav2stft(wav_batch, frame_length, frame_step, n_fft)
 
-  mag = tf.math.abs(spec)
-  phase = tf.math.angle(spec)
-  spec2 = tf.complex(mag, 0.0) * tf.exp(tf.complex(0.0, phase))
+  # mag = tf.math.abs(spec)
+  # phase = tf.math.angle(spec)
+  # spec2 = tf.complex(mag, 0.0) * tf.exp(tf.complex(0.0, phase))
 
-  wav2 = misc_utils.tf_stft2wav(spec2, frame_length, frame_step, n_fft)
+  wav2 = misc_utils.tf_stft2wav(spec, frame_length, frame_step, n_fft)
 
   sess = tf.compat.v1.Session()
   wav_np = sess.run(wav2)
+  print(np.shape(wav_batch), np.shape(wav_np))
   wav_np = wav_np[0][:len(wav)]
 
   pesq = assess_core.calc_pesq(wav, wav_np, sr)

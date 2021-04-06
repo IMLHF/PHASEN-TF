@@ -1,9 +1,71 @@
 import tensorflow as tf
 import collections
+import numpy as np
 
 from ..FLAGS import PARAM
 from ..utils import losses
 from ..utils import misc_utils
+
+
+# def dense(o, n, act=None, use_bias=True, np=None, name="dense"):
+#     with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+#        if np is None:
+#           w = get_variable("W", (o.get_shape().as_list()[-1],n))
+#           o = tf.tensordot(o,w,[(-1),(-2)])
+#        else:
+#           w1 = get_variable("W1", (o.get_shape().as_list()[-1],np))
+#           w2 = get_variable("W2", (np,n))
+#           w = tf.matmul(w1,w2, name="W")
+#           o = tf.tensordot(o,w,[(-1),(-2)])
+#        if use_bias:
+#           o = o + get_variable("b",(n,))
+#        o = act(o) if act else o
+#        return o
+
+
+# def conv2dx(o, n, act=None, h=[-1,0,1], w=[-1,0,1], name='conv2d'):
+#  '''
+#  :param o: input of shape [B, H, W, C]
+#  :param n: output channel number
+#  :param h: kernel index for H
+#  :param w: kernel index for W
+#  :return: shape [B, H, W, n]
+#  '''
+#  B,H,W,C = o.get_shape().as_list()
+#  with tf.variable_scope(name,reuse=tf.AUTO_REUSE):
+#     hn1,hn2 = -np.min(h+[0]),np.max(h+[0])
+#     wn1,wn2 = -np.min(w+[0]),np.max(w+[0])
+#     o = tf.pad(o,[(0,0),(hn1,hn2),(wn1,wn2),(0,0)],mode="SYMMETRIC")
+#     o = tf.concat([ o[:, hn1+i:hn1+i+H, wn1+j:wn1+j+W, :] for j in w for i in h], axis=-1)
+#     o = dense(o,n,None,name="conv2dx")
+#  return act(o) if act else o
+
+class SelfConv2d(tf.keras.layers.Layer):
+  def __init__(self, filters, kernel_size,
+               activation=None, use_bias=True, trainable=True,
+               name='conv2d', padding='same'):
+    super(SelfConv2d, self).__init__()
+    assert padding == 'same', 'only same is surpported.'
+    assert kernel_size[0] & 1 == 1 and kernel_size[1] & 1 == 1, "filters dime must be odd"
+    self._h = [i for i in range(-(kernel_size[0] // 2), (kernel_size[0] // 2)+1)]
+    self._w = [i for i in range(-(kernel_size[1] // 2), (kernel_size[1] // 2)+1)]
+    self._name = name
+    self.dense_kernel = tf.keras.layers.Dense(filters,
+                                              activation=activation,
+                                              use_bias=use_bias,
+                                              trainable=trainable,
+                                              name='D')
+
+  def call(self, feature_in):
+    fea_shape = tf.shape(feature_in)
+    H = fea_shape[1]
+    W = fea_shape[2]
+    hn1,hn2 = -np.min(self._h+[0]),np.max(self._h+[0])
+    wn1,wn2 = -np.min(self._w+[0]),np.max(self._w+[0])
+    out = tf.pad(feature_in,[(0,0),(hn1,hn2),(wn1,wn2),(0,0)],mode="SYMMETRIC")
+    out = tf.concat([out[:, hn1+i:hn1+i+H, wn1+j:wn1+j+W, :] for j in self._w for i in self._h], axis=-1)
+    out = self.dense_kernel(out)
+    return out
 
 
 class BatchNormAndActivate(tf.keras.Model):
@@ -49,10 +111,11 @@ class Stream_PreNet(tf.keras.Model):
     self.nn_layers = []
     for i, kernel in enumerate(kernels):
       conv_name = ("conv2d_%d" % i)
-      conv2d = tf.keras.layers.Conv2D(filters=channel_out,
-                                      kernel_size=kernel,
-                                      activation=(None if conv2d_bn else conv2d_activation),
-                                      padding="same", name=conv_name)
+      conv2d = SelfConv2d(filters=channel_out,
+                          kernel_size=kernel,
+                          activation=(
+                              None if conv2d_bn else conv2d_activation),
+                          padding="same", name=conv_name)
       self.nn_layers.append({'name':'conv2d', 'fn':conv2d})
       if conv2d_bn:
         bn_fn = BatchNormAndActivate(bn_axis=-1, activation=conv2d_activation, name='bna_%d' % i)
@@ -81,8 +144,10 @@ class FrequencyTransformationBlock(tf.keras.Model):
   def __init__(self, frequency_dim, channel_in_out, channel_attention=5, name="FTB"):
     super(FrequencyTransformationBlock, self).__init__()
     self._name = name
-    self.att_conv2d_1 = tf.keras.layers.Conv2D(channel_attention, [1, 1], padding="same",
-                                               name="att_conv2d_1")  # [batch, T, F * channel_attention]
+    self.frequency_dim = frequency_dim
+    self.channel_out = channel_in_out
+    self.att_conv2d_1 = SelfConv2d(channel_attention, [1, 1], padding="same",
+                                   name="att_conv2d_1")  # [batch, T, F * channel_attention]
     self.att_conv2d_1_bna = BatchNormAndActivate(name="att_conv2d_1_bna")
 
     self.att_inner_reshape = tf.keras.layers.Reshape(
@@ -94,8 +159,8 @@ class FrequencyTransformationBlock(tf.keras.Model):
     self.frequencyFC = tf.keras.layers.Dense(frequency_dim, name="FFC")
     self.concat_FFCout_and_In = tf.keras.layers.Concatenate(-1)
 
-    self.out_conv2d = tf.keras.layers.Conv2D(channel_in_out, [1, 1], padding="same",
-                                             name="out_conv2d")
+    self.out_conv2d = SelfConv2d(channel_in_out, [1, 1], padding="same",
+                                 name="out_conv2d")
     self.out_conv2d_bna = BatchNormAndActivate(name="out_conv2d_bna")
 
   def call(self, feature_in, training):
@@ -117,6 +182,8 @@ class FrequencyTransformationBlock(tf.keras.Model):
     ffc_out_T = self.frequencyFC(atted_out_T)
     # [batch, T, F, channel_in_out]
     ffc_out = tf.transpose(ffc_out_T, perm=[0, 1, 3, 2])
+    feature_in.set_shape([None, None, self.frequency_dim, self.channel_out])
+    # print(feature_in.get_shape().as_list(), ffc_out.get_shape().as_list())
     concated_out = self.concat_FFCout_and_In([feature_in, ffc_out])
 
     out = self.out_conv2d(concated_out)
@@ -128,7 +195,7 @@ class InfoCommunicate(tf.keras.Model):
   def __init__(self, channel_out, activate_fn=tf.keras.activations.tanh, name='InfoC'):
     super(InfoCommunicate, self).__init__()
     self._name = name
-    self.conv2d = tf.keras.layers.Conv2D(
+    self.conv2d = SelfConv2d(
         channel_out, [1, 1], padding="same", name="conv2d")
     self.activate_fn = activate_fn
 
@@ -149,13 +216,13 @@ class TwoStreamBlock(tf.keras.Model):
     self._name = name
     self.sA1_pre_FTB = FrequencyTransformationBlock(
         frequency_dim, channel_in_out_A, name="sA1_pre_FTB")
-    self.sA2_conv2d = tf.keras.layers.Conv2D(
+    self.sA2_conv2d = SelfConv2d(
         channel_in_out_A, [5, 5], padding="same", name="sA2_conv2d")
     self.sA2_conv2d_bna = BatchNormAndActivate(name="sA2_conv2d_bna")
-    self.sA3_conv2d = tf.keras.layers.Conv2D(
+    self.sA3_conv2d = SelfConv2d(
         channel_in_out_A, [25, 1], padding="same", name="sA3_conv2d")
     self.sA3_conv2d_bna = BatchNormAndActivate(name="sA3_conv2d_bna")
-    self.sA4_conv2d = tf.keras.layers.Conv2D(
+    self.sA4_conv2d = SelfConv2d(
         channel_in_out_A, [5, 5], padding="same", name="sA4_conv2d")
     self.sA4_conv2d_bna = BatchNormAndActivate(name="sA4_conv2d_bna")
     self.sA5_post_FTB = FrequencyTransformationBlock(
@@ -165,11 +232,11 @@ class TwoStreamBlock(tf.keras.Model):
 
     self.sP1_conv2d_before_LN = tf.keras.layers.LayerNormalization(
         -1, name="sP1_conv2d_before_LN")
-    self.sP1_conv2d = tf.keras.layers.Conv2D(
+    self.sP1_conv2d = SelfConv2d(
         channel_in_out_P, [5, 3], padding="same", name="sP1_conv2d")
     self.sP2_conv2d_before_LN = tf.keras.layers.LayerNormalization(
         -1, name="sP2_conv2d_before_LN")
-    self.sP2_conv2d = tf.keras.layers.Conv2D(
+    self.sP2_conv2d = SelfConv2d(
         channel_in_out_P, [25, 1], padding="same", name="sP2_conv2d")
     self.sP3_info_communicate = InfoCommunicate(
         channel_in_out_P, name="InfoC_P")
@@ -186,7 +253,7 @@ class TwoStreamBlock(tf.keras.Model):
     sA_out = self.sA4_conv2d_bna(sA_out, training=training)
     sA_out = self.sA5_post_FTB(sA_out, training=training)
 
-    # Strean P
+    # Stream P
     sP_out = feature_sP
     sP_out = self.sP1_conv2d_before_LN(sP_out)
     sP_out = self.sP1_conv2d(sP_out)
@@ -204,21 +271,29 @@ class StreamAmplitude_PostNet(tf.keras.Model):
   def __init__(self, frequency_dim, name="sA_PostNet"):
     super(StreamAmplitude_PostNet, self).__init__()
     self._name = name
-    self.p1_conv2d = tf.keras.layers.Conv2D(8, [1, 1],
-                                            activation=tf.keras.activations.sigmoid,
-                                            padding="same", name="p1_conv2d")
+    self.p1_conv2d = SelfConv2d(8, [1, 1],
+                                activation=tf.keras.activations.sigmoid,
+                                padding="same", name="p1_conv2d")
     self.p1_reshape = tf.keras.layers.Reshape([-1, frequency_dim * 8])
 
-    fw_lstm = tf.keras.layers.LSTM(600,
-                                   #  dropout=0.2,
-                                   implementation=2,
-                                   return_sequences=True, name='fwlstm')
-    bw_lstm = tf.keras.layers.LSTM(600,
-                                   #  dropout=0.2,
-                                   implementation=2,
-                                   return_sequences=True, name='bwlstm', go_backwards=True)
+    # fw_lstm = tf.keras.layers.LSTM(600,
+    #                                #  dropout=0.2,
+    #                                implementation=2,
+    #                                return_sequences=True, name='fwlstm')
+    # bw_lstm = tf.keras.layers.LSTM(600,
+    #                                #  dropout=0.2,
+    #                                implementation=2,
+    #                                return_sequences=True, name='bwlstm', go_backwards=True)
+    fw_lstm = tf.compat.v1.keras.layers.CuDNNLSTM(600,
+                                                  #  dropout=0.2,
+                                                  # implementation=2,
+                                                  return_sequences=True, name='fwlstm')
+    bw_lstm = tf.compat.v1.keras.layers.CuDNNLSTM(600,
+                                                  #  dropout=0.2,
+                                                  # implementation=2,
+                                                  return_sequences=True, name='bwlstm', go_backwards=True)
     self.p2_blstm = tf.keras.layers.Bidirectional(layer=fw_lstm, backward_layer=bw_lstm,
-                                                  merge_mode='concat', name=name+'/p2_blstm')
+                                                  merge_mode='concat', name='p2_blstm')
 
     self.p3_dense = tf.keras.layers.Dense(
         600, activation=tf.keras.activations.relu, name="p3_dense")
@@ -245,7 +320,7 @@ class StreamPhase_PostNet(tf.keras.Model):
   def __init__(self, name="sP_PostNet"):
     super(StreamPhase_PostNet, self).__init__()
     self._name = name
-    self._layers.append(tf.keras.layers.Conv2D(
+    self._layers.append(SelfConv2d(
         2, [1, 1], padding="same", name="conv2d"))
 
   def call(self, feature_sP, training):
